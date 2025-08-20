@@ -6,7 +6,7 @@
  * COPYING.md in the root of the source code directory.
  *
  ****************************************************************************/
-
+#include <QQmlEngine>
 #include "QGCCameraManager.h"
 #include "JoystickManager.h"
 #include "SimulatedCameraControl.h"

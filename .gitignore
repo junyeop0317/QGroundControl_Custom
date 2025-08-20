@@ -94,3 +94,24 @@ docs/.vitepress/dist/
 
 CMakeUserPresets.json
 cpm_modules
+
+# 빌드 디렉토리
+build/
+build/Release/
+build/Debug/
+
+# Qt Creator / IDE 관련
+*.pro.user
+*.user
+*.autosave
+*.qrc~
+
+# 컴파일 산출물
+*.o
+*.a
+*.so
+*.dll
+*.exe
+*.log
+*.obj
+EOL

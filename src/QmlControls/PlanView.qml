@@ -262,7 +262,8 @@ Item {
 
     function insertSimpleItemAfterCurrent(coordinate) {
         var nextIndex = _missionController.currentPlanViewVIIndex + 1
-        _missionController.insertSimpleMissionItem(coordinate, nextIndex, true /* makeCurrentItem */)
+        var coord = coordinate || mapCenter()
+        _missionController.insertSimpleMissionItem(coord, nextIndex, true /* makeCurrentItem */)
     }
 
     function insertROIAfterCurrent(coordinate) {
@@ -280,9 +281,10 @@ Item {
         _missionController.insertComplexMissionItem(complexItemName, mapCenter(), nextIndex, true /* makeCurrentItem */)
     }
 
-    function insertTakeoffItemAfterCurrent() {
+    function insertTakeoffItemAfterCurrent(coordinate) {
         var nextIndex = _missionController.currentPlanViewVIIndex + 1
-        _missionController.insertTakeoffItem(mapCenter(), nextIndex, true /* makeCurrentItem */)
+        var coord = coordinate || mapCenter()  // coordinate가 없으면 mapCenter 사용
+        _missionController.insertTakeoffItem(coord, nextIndex, true /* makeCurrentItem */)
     }
 
     function insertLandItemAfterCurrent() {
@@ -649,8 +651,17 @@ Item {
                         enabled:            true
                         visible:            true
                         dropPanelComponent: centerMapDropPanel
+                    },
+                    ToolStripAction {
+                               text: qsTr("Address")
+                               iconSource: "/qmlimages/MapSearch.svg" // 임시 아이콘
+                               enabled: true
+                               visible: true
+                               onTriggered: {
+                                   searchPanel.visible = !searchPanel.visible // AddressSearch.qml 토글
+                               }
                     }
-                ]
+                ]  
             }
 
             model: toolStripActionList.model
@@ -661,6 +672,28 @@ Item {
             }
 
             onDropped: allAddClickBoolsOff()
+        }
+
+        AddressSearch {
+            id: searchPanel
+            editorMap: editorMap
+            anchors.top: parent.top
+            anchors.left: toolStrip.right
+            visible: false
+            width: 300
+        }
+
+        // 시그널 연결
+        Connections {
+            target: searchPanel
+            onRequestAddWaypoint: {
+                var coordinate = QtPositioning.coordinate(lat, lon)
+                if (_visualItems.count === 0) {
+                    insertTakeoffItemAfterCurrent(coordinate)
+                } else {
+                    insertSimpleItemAfterCurrent(coordinate)
+                }
+            }
         }
 
         //-----------------------------------------------------------

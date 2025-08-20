@@ -46,6 +46,7 @@
 #include "Vehicle.h"
 #include "VehicleComponent.h"
 #include "VideoManager.h"
+#include "QmlControls/VWorldSearch.h"
 
 #ifndef QGC_NO_SERIAL_LINK
 #include "SerialLink.h"
@@ -95,7 +96,7 @@ QGCApplication::QGCApplication(int &argc, char *argv[], bool unitTesting, bool s
 #ifdef QGC_DAILY_BUILD
         // This gives daily builds their own separate settings space. Allowing you to use daily and stable builds
         // side by side without daily screwing up your stable settings.
-        applicationName = QStringLiteral("%1 Daily").arg(QGC_APP_NAME);
+        applicationName = QStringLiteral("%1 awesome-tech").arg(QGC_APP_NAME);
 #else
         applicationName = QGC_APP_NAME;
 #endif
@@ -253,24 +254,21 @@ void QGCApplication::_initVideo()
 void QGCApplication::_initForNormalAppBoot()
 {
     _initVideo(); // GStreamer must be initialized before QmlEngine
-
     QQuickStyle::setStyle("Basic");
     QGCCorePlugin::instance()->init();
     MAVLinkProtocol::instance()->init();
     MultiVehicleManager::instance()->init();
     _qmlAppEngine = QGCCorePlugin::instance()->createQmlApplicationEngine(this);
+    qmlRegisterType<VWorldSearch>("QGroundControl.VWorldSearch", 1, 0, "VWorldSearch");
     QObject::connect(_qmlAppEngine, &QQmlApplicationEngine::objectCreationFailed, this, QCoreApplication::quit, Qt::QueuedConnection);
     QGCCorePlugin::instance()->createRootWindow(_qmlAppEngine);
-
     AudioOutput::instance()->init(SettingsManager::instance()->appSettings()->audioMuted());
     FollowMe::instance()->init();
     QGCPositionManager::instance()->init();
     LinkManager::instance()->init();
     VideoManager::instance()->init(mainRootWindow());
-
     // Image provider for Optical Flow
     _qmlAppEngine->addImageProvider(_qgcImageProviderId, new QGCImageProvider());
-
     // Set the window icon now that custom plugin has a chance to override it
 #ifdef Q_OS_LINUX
     QUrl windowIcon = QUrl("qrc:/res/qgroundcontrol.ico");

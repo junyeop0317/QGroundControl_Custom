@@ -55,6 +55,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         ToolStripAction.h
         ToolStripActionList.cc
         ToolStripActionList.h
+        VWorldSearch.cpp
+        VWorldSearch.h
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -70,6 +72,7 @@ qt_add_qml_module(QGroundControlControlsModule
     VERSION 1.0
     RESOURCE_PREFIX /qml
     QML_FILES
+    	AddressSearch.qml
         AltModeDialog.qml
         AppSettings.qml
         APMSubMotorDisplay.qml
