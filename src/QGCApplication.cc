@@ -48,6 +48,7 @@
 #include "VideoManager.h"
 #include "QmlControls/VWorldSearch.h"
 
+
 #ifndef QGC_NO_SERIAL_LINK
 #include "SerialLink.h"
 #endif

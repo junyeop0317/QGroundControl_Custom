@@ -23,6 +23,9 @@ signals:
 private:
     void processSearchResponse(QNetworkReply *reply);
     void setSearchResults(const QList<QVariant> &results);
+    
+    // 환경 변수에서 API 키 가져오기 함수
+    QString getVWorldApiKey() const;
 
     QNetworkAccessManager *_networkManager;
     QList<QVariant> _searchResults;

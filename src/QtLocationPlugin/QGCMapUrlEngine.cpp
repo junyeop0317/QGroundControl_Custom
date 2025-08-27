@@ -21,6 +21,7 @@
 #include "EsriMapProvider.h"
 #include "MapboxMapProvider.h"
 #include "ElevationMapProvider.h"
+#include "VWorldTMSMapProvider.h"   // 추가
 #include <QGCLoggingCategory.h>
 
 QGC_LOGGING_CATEGORY(QGCMapUrlEngineLog, "qgc.qtlocationplugin.qgcmapurlengine")
@@ -62,6 +63,7 @@ const QList<SharedMapProvider> UrlFactory::_providers = {
 
     std::make_shared<VWorldStreetMapProvider>(),
     std::make_shared<VWorldSatMapProvider>(),
+    std::make_shared<VWorldTMSMapProvider>(),  // <-- 추가된 부분
 
     std::make_shared<JapanStdMapProvider>(),
     std::make_shared<JapanSeamlessMapProvider>(),
@@ -78,6 +80,7 @@ const QList<SharedMapProvider> UrlFactory::_providers = {
     std::make_shared<CopernicusElevationProvider>()
 };
 
+// 이하 기존 코드 그대로
 QString UrlFactory::getImageFormat(int qtMapId, QByteArrayView image)
 {
     const SharedMapProvider provider = getMapProviderFromQtMapId(qtMapId);
@@ -162,7 +165,6 @@ QGCTileSet UrlFactory::getTileCount(int zoom, double topleftLon, double topleftL
 {
     const SharedMapProvider provider = getMapProviderFromProviderType(mapType);
     if (provider) {
-        // TODO: Check QGeoCameraCapabilities.maximumZoomLevel() and QGeoCameraCapabilities.minimumZoomLevel()
         if(zoom < 1) {
             zoom = 1;
         } else if(zoom > MAX_MAP_ZOOM) {
@@ -176,7 +178,6 @@ QGCTileSet UrlFactory::getTileCount(int zoom, double topleftLon, double topleftL
 
 QString UrlFactory::getProviderTypeFromQtMapId(int qtMapId)
 {
-    // Default Set
     if(qtMapId == -1) {
         return nullptr;
     }
@@ -193,7 +194,6 @@ QString UrlFactory::getProviderTypeFromQtMapId(int qtMapId)
 
 SharedMapProvider UrlFactory::getMapProviderFromQtMapId(int qtMapId)
 {
-    // Default Set
     if(qtMapId == -1) {
         return nullptr;
     }
@@ -237,7 +237,7 @@ QStringList UrlFactory::getElevationProviderTypes()
     QStringList types;
     for (const SharedMapProvider &provider : _providers) {
         if (provider->isElevationProvider()) {
-            (void) types.append(provider->getMapName());
+            types.append(provider->getMapName());
         }
     }
 
@@ -248,7 +248,7 @@ QStringList UrlFactory::getProviderTypes()
 {
     QStringList types;
     for (const SharedMapProvider &provider : _providers) {
-        (void) types.append(provider->getMapName());
+        types.append(provider->getMapName());
     }
 
     return types;
@@ -267,7 +267,6 @@ QString UrlFactory::providerTypeFromHash(int hash)
     return QStringLiteral("");
 }
 
-// This seems to limit provider name length to less than ~25 chars due to downcasting to int
 int UrlFactory::hashFromProviderType(QStringView type)
 {
     const auto hash = qHash(type) >> 1;

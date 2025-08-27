@@ -380,10 +380,10 @@ Item {
                 coordinate.latitude = coordinate.latitude.toFixed(_decimalPlaces)
                 coordinate.longitude = coordinate.longitude.toFixed(_decimalPlaces)
                 coordinate.altitude = coordinate.altitude.toFixed(_decimalPlaces)
-				if(_utmspEnabled){
-                	QGroundControl.utmspManager.utmspVehicle.updateLastCoordinates(coordinate.latitude, coordinate.longitude)
+                if(_utmspEnabled){
+                    QGroundControl.utmspManager.utmspVehicle.updateLastCoordinates(coordinate.latitude, coordinate.longitude)
                 }
-                
+
                 switch (_editingLayer) {
                 case _layerMission:
                     if (addWaypointRallyPointAction.checked) {
@@ -402,9 +402,9 @@ Item {
 
                 case _layerUTMSP:
                     if (addWaypointRallyPointAction.checked) {
-                    	insertSimpleItemAfterCurrent(coordinate)
+                        insertSimpleItemAfterCurrent(coordinate)
                     } else if (_addROIOnClick) {
-                    	insertROIAfterCurrent(coordinate)
+                        insertROIAfterCurrent(coordinate)
                         _addROIOnClick = false
                     }
                     break
@@ -660,9 +660,18 @@ Item {
                                visible: true
                                onTriggered: {
                                    searchPanel.visible = !searchPanel.visible // AddressSearch.qml 토글
+                                   if (searchPanel.visible) cadastralPanel.visible = false
                                }
+                    },
+                    ToolStripAction {
+                        text: qsTr("Cadastral")
+                        iconSource: "/qmlimages/Survey.svg"
+                        onTriggered: {
+                            cadastralSearchPanel.visible = !cadastralSearchPanel.visible
+                        }
                     }
-                ]  
+
+                ]
             }
 
             model: toolStripActionList.model
@@ -696,6 +705,46 @@ Item {
                 }
             }
         }
+
+        Column {
+            id: cadastralSearchPanel
+            width: 300
+            spacing: 10
+            visible: false
+
+            property var planMasterController
+
+            anchors {
+                top: parent.top       // PlanView 맨 위 기준
+                left: toolStrip.right     // 왼쪽 고정
+                margins: 10           // 살짝 안쪽으로 띄움 (툴바랑 겹치지 않게)
+            }
+
+            QGCTextField {
+                id: streetTextField
+                width: parent.width
+                placeholderText: qsTr("지적도 주소 검색")
+
+                onAccepted: {
+                    if (text.length > 0) {
+                        planMasterController.findCadastralAndCreateSurvey(text)
+                        cadastralSearchPanel.visible = false
+                    }
+                }
+            }
+
+            QGCButton {
+                text: qsTr("Search")
+                width: parent.width
+                onClicked: {
+                    if (streetTextField.text.length > 0) {
+                        planMasterController.findCadastralAndCreateSurvey(streetTextField.text)
+                        cadastralSearchPanel.visible = false
+                    }
+                }
+            }
+        }
+
 
         //-----------------------------------------------------------
         // Right pane for mission editing controls
@@ -945,6 +994,8 @@ Item {
                                                       UTMSPStateStorage.indicatorActivatedStatus = false;
                                                       UTMSPStateStorage.currentStateIndex = 0}})
     }
+
+
 
     //- ToolStrip ToolStripDropPanel Components
 

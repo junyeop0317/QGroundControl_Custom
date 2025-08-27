@@ -25,20 +25,37 @@
 #include "GeoFenceManager.h"
 #include "RallyPointManager.h"
 #include "QGCLoggingCategory.h"
-
+#include "QGCMapPolygon.h"
+#include "SurveyComplexItem.h"
+#include <QProcessEnvironment>
+#include <algorithm>
+#include <QUrl>
+#include <QDebug>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QFileInfo>
+#include <QDir>
+#include <QVariant>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
+#include <QGeoCoordinate>
+#include <QJsonArray>
 
+
+QGC_LOGGING_CATEGORY(PlanControllerLog, "PlanControllerLog")
 QGC_LOGGING_CATEGORY(PlanMasterControllerLog, "PlanMasterControllerLog")
 
 PlanMasterController::PlanMasterController(QObject* parent)
     : QObject               (parent)
-    , _multiVehicleMgr      (MultiVehicleManager::instance())
-    , _controllerVehicle    (new Vehicle(Vehicle::MAV_AUTOPILOT_TRACK, Vehicle::MAV_TYPE_TRACK, this))
-    , _managerVehicle       (_controllerVehicle)
-    , _missionController    (this)
-    , _geoFenceController   (this)
-    , _rallyPointController (this)
+      , _multiVehicleMgr      (MultiVehicleManager::instance())
+      , _controllerVehicle    (new Vehicle(Vehicle::MAV_AUTOPILOT_TRACK, Vehicle::MAV_TYPE_TRACK, this))
+      , _managerVehicle       (_controllerVehicle)
+      , _missionController    (this)
+      , _geoFenceController   (this)
+      , _rallyPointController (this)
 {
     _commonInit();
 }
@@ -46,12 +63,12 @@ PlanMasterController::PlanMasterController(QObject* parent)
 #ifdef QT_DEBUG
 PlanMasterController::PlanMasterController(MAV_AUTOPILOT firmwareType, MAV_TYPE vehicleType, QObject* parent)
     : QObject               (parent)
-    , _multiVehicleMgr      (MultiVehicleManager::instance())
-    , _controllerVehicle    (new Vehicle(firmwareType, vehicleType))
-    , _managerVehicle       (_controllerVehicle)
-    , _missionController    (this)
-    , _geoFenceController   (this)
-    , _rallyPointController (this)
+      , _multiVehicleMgr      (MultiVehicleManager::instance())
+      , _controllerVehicle    (new Vehicle(firmwareType, vehicleType))
+      , _managerVehicle       (_controllerVehicle)
+      , _missionController    (this)
+      , _geoFenceController   (this)
+      , _rallyPointController (this)
 {
     _commonInit();
 }
@@ -72,7 +89,7 @@ void PlanMasterController::_commonInit(void)
     connect(&_geoFenceController,   &GeoFenceController::syncInProgressChanged,     this, &PlanMasterController::syncInProgressChanged);
     connect(&_rallyPointController, &RallyPointController::syncInProgressChanged,   this, &PlanMasterController::syncInProgressChanged);
 
-    // Offline vehicle can change firmware/vehicle type
+            // Offline vehicle can change firmware/vehicle type
     connect(_controllerVehicle,     &Vehicle::vehicleTypeChanged,                   this, &PlanMasterController::_updatePlanCreatorsList);
 }
 
@@ -129,12 +146,12 @@ void PlanMasterController::_activeVehicleChanged(Vehicle* activeVehicle)
         newOffline = false;
         _managerVehicle = activeVehicle;
 
-        // Update controllerVehicle to the currently connected vehicle
+                // Update controllerVehicle to the currently connected vehicle
         AppSettings* appSettings = SettingsManager::instance()->appSettings();
         appSettings->offlineEditingFirmwareClass()->setRawValue(QGCMAVLink::firmwareClass(_managerVehicle->firmwareType()));
         appSettings->offlineEditingVehicleClass()->setRawValue(QGCMAVLink::vehicleClass(_managerVehicle->vehicleType()));
 
-        // We use these signals to sequence upload and download to the multiple controller/managers
+                // We use these signals to sequence upload and download to the multiple controller/managers
         connect(_managerVehicle->missionManager(),      &MissionManager::newMissionItemsAvailable,  this, &PlanMasterController::_loadMissionComplete);
         connect(_managerVehicle->geoFenceManager(),     &GeoFenceManager::loadComplete,             this, &PlanMasterController::_loadGeoFenceComplete);
         connect(_managerVehicle->rallyPointManager(),   &RallyPointManager::loadComplete,           this, &PlanMasterController::_loadRallyPointsComplete);
@@ -191,7 +208,7 @@ void PlanMasterController::_activeVehicleChanged(Vehicle* activeVehicle)
         }
     }
 
-    // Vehicle changed so we need to signal everything
+            // Vehicle changed so we need to signal everything
     emit containsItemsChanged(containsItems());
     emit syncInProgressChanged();
     emit dirtyChanged(dirty());
@@ -379,18 +396,18 @@ void PlanMasterController::loadFromFile(const QString& filename)
         }
 
         QList<JsonHelper::KeyValidateInfo> rgKeyInfo = {
-            { kJsonMissionObjectKey,        QJsonValue::Object, true },
-            { kJsonGeoFenceObjectKey,       QJsonValue::Object, true },
-            { kJsonRallyPointsObjectKey,    QJsonValue::Object, true },
-        };
+                                                        { kJsonMissionObjectKey,        QJsonValue::Object, true },
+                                                        { kJsonGeoFenceObjectKey,       QJsonValue::Object, true },
+                                                        { kJsonRallyPointsObjectKey,    QJsonValue::Object, true },
+                                                        };
         if (!JsonHelper::validateKeys(json, rgKeyInfo, errorString)) {
             qgcApp()->showAppMessage(errorMessage.arg(errorString));
             return;
         }
 
         if (!_missionController.load(json[kJsonMissionObjectKey].toObject(), errorString) ||
-                !_geoFenceController.load(json[kJsonGeoFenceObjectKey].toObject(), errorString) ||
-                !_rallyPointController.load(json[kJsonRallyPointsObjectKey].toObject(), errorString)) {
+            !_geoFenceController.load(json[kJsonGeoFenceObjectKey].toObject(), errorString) ||
+            !_rallyPointController.load(json[kJsonRallyPointsObjectKey].toObject(), errorString)) {
             qgcApp()->showAppMessage(errorMessage.arg(errorString));
         } else {
             //-- Allow plugins to post process the load
@@ -467,7 +484,7 @@ void PlanMasterController::saveToFile(const QString& filename)
         }
     }
 
-    // Only clear dirty bit if we are offline
+            // Only clear dirty bit if we are offline
     if (offline()) {
         setDirty(false);
     }
@@ -559,7 +576,7 @@ QStringList PlanMasterController::loadNameFilters(void) const
     QStringList filters;
 
     filters << tr("Supported types (*.%1 *.%2 *.%3 *.%4)").arg(AppSettings::planFileExtension).arg(AppSettings::missionFileExtension).arg(AppSettings::waypointsFileExtension).arg("txt") <<
-               tr("All Files (*)");
+        tr("All Files (*)");
     return filters;
 }
 
@@ -588,7 +605,7 @@ void PlanMasterController::_showPlanFromManagerVehicle(void)
         _managerVehicle->forceInitialPlanRequestComplete();
     }
 
-    // The crazy if structure is to handle the load propagating by itself through the system
+            // The crazy if structure is to handle the load propagating by itself through the system
     if (!_missionController.showPlanFromManagerVehicle()) {
         if (!_geoFenceController.showPlanFromManagerVehicle()) {
             _rallyPointController.showPlanFromManagerVehicle();
@@ -599,15 +616,15 @@ void PlanMasterController::_showPlanFromManagerVehicle(void)
 bool PlanMasterController::syncInProgress(void) const
 {
     return _missionController.syncInProgress() ||
-            _geoFenceController.syncInProgress() ||
-            _rallyPointController.syncInProgress();
+           _geoFenceController.syncInProgress() ||
+           _rallyPointController.syncInProgress();
 }
 
 bool PlanMasterController::isEmpty(void) const
 {
     return _missionController.isEmpty() &&
-            _geoFenceController.isEmpty() &&
-            _rallyPointController.isEmpty();
+           _geoFenceController.isEmpty() &&
+           _rallyPointController.isEmpty();
 }
 
 void PlanMasterController::_updateOverallDirty(void)
@@ -615,7 +632,7 @@ void PlanMasterController::_updateOverallDirty(void)
     if(_previousOverallDirty != dirty()){
         _previousOverallDirty = dirty();
         emit dirtyChanged(_previousOverallDirty);
-    }    
+    }
 }
 
 void PlanMasterController::_updatePlanCreatorsList(void)
@@ -653,3 +670,206 @@ void PlanMasterController::showPlanFromManagerVehicle(void)
         _showPlanFromManagerVehicle();
     }
 }
+
+void PlanMasterController::searchAndGo(const QString& address, bool panAfterSearch) {
+    if (address.length() < 2) {
+        emit suggestionsReady({});
+        return;
+    }
+    QByteArray apiKey = qgetenv("v_world_key");
+    QString requestUrl = QString("https://api.vworld.kr/req/search?service=search&request=search&version=2.0&query=%1&type=place&format=json&errorformat=json&key=%2")
+                             .arg(QUrl::toPercentEncoding(address))
+                             .arg(QString(apiKey));
+   
+    QNetworkAccessManager* manager = new QNetworkAccessManager(this);
+    QNetworkRequest request{QUrl(requestUrl)};
+    QNetworkReply* reply = manager->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, panAfterSearch, manager]() {
+        QVariantList suggestions;
+        QSet<QString> addedTitles;
+        if (reply->error() == QNetworkReply::NoError) {
+            QByteArray responseData = reply->readAll();
+            QJsonDocument doc = QJsonDocument::fromJson(responseData);
+            QJsonObject response = doc.object().value("response").toObject();
+            if (response.value("status").toString() == "OK") {
+                if (response.value("result").toObject().contains("items")) {
+                    QJsonArray items = response.value("result").toObject().value("items").toArray();
+                    if (panAfterSearch && !items.isEmpty()) {
+                        QJsonObject firstItem = items[0].toObject();
+                        QJsonObject point = firstItem.value("point").toObject();
+                        double lon = point.value("x").toString().toDouble();
+                        double lat = point.value("y").toString().toDouble();
+                        addWaypointAndZoom(lat, lon);
+                    }
+                    for (const QJsonValue &value : items) {
+                        QJsonObject item = value.toObject();
+                        QString title = item.value("title").toString();
+                        if (!addedTitles.contains(title)) {
+                            QJsonObject point = item.value("point").toObject();
+                            QVariantMap suggestionItem;
+                            suggestionItem["title"] = title;
+                            suggestionItem["longitude"] = point.value("x").toString().toDouble();
+                            suggestionItem["latitude"] = point.value("y").toString().toDouble();
+                            suggestions.append(suggestionItem);
+                            addedTitles.insert(title);
+                        }
+                    }
+                }
+            } 
+        } 
+       
+        emit suggestionsReady(suggestions);
+        reply->deleteLater();
+        manager->deleteLater();
+    });
+}
+
+
+void PlanMasterController::addWaypointAndZoom(double latitude, double longitude)
+{
+    QGeoCoordinate coordinate(latitude, longitude);
+    int nextIndex = _missionController.currentPlanViewVIIndex() + 1;
+    _missionController.insertSimpleMissionItem(coordinate, nextIndex, true);
+   
+    emit panAndZoomMap(coordinate.latitude(), coordinate.longitude(), 15);
+}
+
+void PlanMasterController::findCadastralAndCreateSurvey(const QString& address)
+{
+    QByteArray apiKey = qgetenv("v_world_key");
+    if (apiKey.isEmpty()) {
+        qCWarning(PlanControllerLog) << "v_world_key is not connect";
+
+        return;
+    }
+
+
+
+            // VWorld 주소 검색 API -> 주소를 좌표로 변환
+    QString searchUrl = QString("https://api.vworld.kr/req/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&address=%1&format=json&type=road&key=%2")
+                            .arg(QUrl::toPercentEncoding(address))
+                            .arg(QString(apiKey));
+
+
+
+    QNetworkAccessManager* searchManager = new QNetworkAccessManager(this);
+    connect(searchManager, &QNetworkAccessManager::finished, searchManager, &QObject::deleteLater);
+    QNetworkReply* searchReply = searchManager->get(QNetworkRequest(QUrl(searchUrl)));
+
+    connect(searchReply, &QNetworkReply::finished, this, [this, searchReply, apiKey, address]() {
+        searchReply->deleteLater();
+
+
+
+        QByteArray responseData = searchReply->readAll();
+
+
+        QJsonDocument doc = QJsonDocument::fromJson(responseData);
+        QJsonObject response = doc.object().value("response").toObject();
+
+
+
+        QJsonObject result = response.value("result").toObject();
+
+
+        // VWorld API 응답에서 좌표 추출
+        QJsonObject point = result.value("point").toObject();
+        double lon = point.value("x").toString().toDouble();
+        double lat = point.value("y").toString().toDouble();
+
+
+
+                //VWorld 지적도 API - 해당 좌표의 토지 경계 폴리곤 검색
+        QString cadastralUrl = QString("https://api.vworld.kr/req/data?service=data&version=2.0&request=GetFeature&format=json&size=1000&page=1&geometry=true&attribute=true&crs=EPSG:4326&geomFilter=POINT(%1 %2)&data=LT_C_SPBD&key=%3")
+                                   .arg(lon).arg(lat).arg(QString(apiKey));
+
+
+        QNetworkAccessManager* cadastralManager = new QNetworkAccessManager(this);
+        connect(cadastralManager, &QNetworkAccessManager::finished, cadastralManager, &QObject::deleteLater);
+        QNetworkReply* cadastralReply = cadastralManager->get(QNetworkRequest(QUrl(cadastralUrl)));
+
+        connect(cadastralReply, &QNetworkReply::finished, this, [this, cadastralReply, address]() {
+            cadastralReply->deleteLater();
+
+            QByteArray cadastralResponseData = cadastralReply->readAll();
+            QJsonDocument cadastralDoc = QJsonDocument::fromJson(cadastralResponseData);
+            QJsonObject cadastralResponse = cadastralDoc.object().value("response").toObject();
+            QJsonArray features = cadastralResponse.value("result").toObject()
+                                      .value("featureCollection").toObject()
+                                      .value("features").toArray();
+
+           
+
+            QJsonObject firstFeature = features[0].toObject();
+            QJsonObject geometry = firstFeature.value("geometry").toObject();
+            QString geomType = geometry.value("type").toString();
+            QJsonArray coordinates = geometry.value("coordinates").toArray();
+
+            QList<QGeoCoordinate> polygonPoints;
+
+            if (geomType == "Polygon") {
+                QJsonArray polygonRing = coordinates[0].toArray();
+                for (const QJsonValue& pointValue : polygonRing) {
+                    QJsonArray point = pointValue.toArray();
+                    if (point.size() >= 2) {
+                        polygonPoints.append(QGeoCoordinate(point[1].toDouble(), point[0].toDouble()));
+                    }
+                }
+            } else if (geomType == "MultiPolygon") {
+                QJsonArray polygonRing = coordinates[0].toArray()[0].toArray();
+                for (const QJsonValue& pointValue : polygonRing) {
+                    QJsonArray point = pointValue.toArray();
+                    if (point.size() >= 2) {
+                        polygonPoints.append(QGeoCoordinate(point[1].toDouble(), point[0].toDouble()));
+                    }
+                }
+            }
+
+            
+
+            int nextIndex = _missionController.currentPlanViewVIIndex() + 1;
+            _missionController.insertComplexMissionItem("Survey", polygonPoints.first(), nextIndex, true);
+
+            VisualMissionItem* newSurveyItem = qobject_cast<VisualMissionItem*>(_missionController.visualItems()->get(nextIndex));
+            if (newSurveyItem) {
+                SurveyComplexItem* surveyItem = qobject_cast<SurveyComplexItem*>(newSurveyItem);
+                if (surveyItem) {
+                    QGCMapPolygon* polygon = surveyItem->surveyAreaPolygon();
+                    if (polygon) {
+                        polygon->setPath(polygonPoints);
+                    }
+                }
+            }
+
+                    // 지도 화면 이동은 항상 호출
+            emit planReadyForViewing();
+        }); //
+    });
+}
+
+QVariantList PlanMasterController::streetResults() const
+{
+    return _streetResults;
+}
+
+void PlanMasterController::searchStreet(const QString& jibunText)
+{
+    // 리스트 초기화
+    _streetResults.clear();
+    
+    QVariantMap item;
+    item["id"] = jibunText;
+    item["name"] = QString("지번: %1").arg(jibunText);
+
+    _streetResults.append(item);
+
+    emit streetResultsChanged();
+
+            
+}
+
+void PlanMasterController::loadStreetPolygon(const QString& featureId)
+{
+   
+}
+

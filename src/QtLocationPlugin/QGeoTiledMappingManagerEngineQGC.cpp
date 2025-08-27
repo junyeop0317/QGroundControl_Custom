@@ -33,11 +33,11 @@ QGC_LOGGING_CATEGORY(QGeoTiledMappingManagerEngineQGCLog, "qgc.qtlocationplugin.
 
 QGeoTiledMappingManagerEngineQGC::QGeoTiledMappingManagerEngineQGC(const QVariantMap &parameters, QGeoServiceProvider::Error *error, QString *errorString, QNetworkAccessManager *networkManager, QObject *parent)
     : QGeoTiledMappingManagerEngine(parent)
-    , m_networkManager(networkManager)
+      , m_networkManager(networkManager)
 {
     // qCDebug(QGeoTiledMappingManagerEngineQGCLog) << Q_FUNC_INFO << this;
 
-    // TODO: Better way to get current language without qgcApp()?
+            // TODO: Better way to get current language without qgcApp()?
     setLocale(qgcApp()->getCurrentLanguage());
 
     QGeoCameraCapabilities cameraCaps;
@@ -69,7 +69,7 @@ QGeoTiledMappingManagerEngineQGC::QGeoTiledMappingManagerEngineQGC(const QVarian
             provider->getMapId(),
             QByteArrayLiteral("QGroundControl"),
             cameraCapabilities()
-        );
+            );
         (void) mapList.append(map);
     }
     setSupportedMapTypes(mapList);
@@ -78,7 +78,7 @@ QGeoTiledMappingManagerEngineQGC::QGeoTiledMappingManagerEngineQGC(const QVarian
     QGeoFileTileCacheQGC* const fileTileCache = new QGeoFileTileCacheQGC(parameters);
     setTileCache(fileTileCache);
 
-    // MapEngine must be init after fileTileCache
+            // MapEngine must be init after fileTileCache
     static std::once_flag mapEngineInit;
     std::call_once(mapEngineInit, [fileTileCache]() {
         getQGCMapEngine()->init(fileTileCache->getDatabaseFilePath());
@@ -88,11 +88,11 @@ QGeoTiledMappingManagerEngineQGC::QGeoTiledMappingManagerEngineQGC(const QVarian
 
     if (!m_networkManager) {
         m_networkManager = new QNetworkAccessManager(this);
-        #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
-            QNetworkProxy proxy = m_networkManager->proxy();
-            proxy.setType(QNetworkProxy::DefaultProxy);
-            m_networkManager->setProxy(proxy);
-        #endif
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+        QNetworkProxy proxy = m_networkManager->proxy();
+        proxy.setType(QNetworkProxy::DefaultProxy);
+        m_networkManager->setProxy(proxy);
+#endif
         m_networkManager->setTransferTimeout(10000);
         // m_networkManager->setAutoDeleteReplies(true);
         QNetworkDiskCache *const diskCache = new QNetworkDiskCache(this);
@@ -111,7 +111,7 @@ QGeoTiledMappingManagerEngineQGC::QGeoTiledMappingManagerEngineQGC(const QVarian
 
 QGeoTiledMappingManagerEngineQGC::~QGeoTiledMappingManagerEngineQGC()
 {
-    // qCDebug(QGeoTiledMappingManagerEngineQGCLog) << Q_FUNC_INFO << this;
+   // qCDebug(QGeoTiledMappingManagerEngineQGCLog) << Q_FUNC_INFO << this;
 }
 
 QGeoMap *QGeoTiledMappingManagerEngineQGC::createMap()

@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDebug>
+#include <QProcessEnvironment>  // 환경 변수 사용 위해 추가
 
 VWorldSearch::VWorldSearch(QObject *parent)
     : QObject(parent), _networkManager(new QNetworkAccessManager(this)) {
@@ -24,24 +25,35 @@ void VWorldSearch::clearSearchResults() {
     }
 }
 
+// 환경 변수에서 API 키 가져오기
+QString VWorldSearch::getVWorldApiKey() const {
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    QString apiKey = env.value("v_world_key");  // 환경 변수 이름
+    if (apiKey.isEmpty()) {
+        qWarning() << "VWorld API Key not found in environment variables!";
+    }
+    return apiKey;
+}
+
 void VWorldSearch::search(const QString &query) {
-    
     _searchResults.clear();
     emit searchResultsChanged();
-    
-    
+
     qDebug() << "Searching for:" << query;
     QUrl url("http://api.vworld.kr/req/search");
     QUrlQuery urlQuery;
     urlQuery.addQueryItem("service", "search");
     urlQuery.addQueryItem("request", "search");
     urlQuery.addQueryItem("version", "2.0");
-    urlQuery.addQueryItem("size", "10");   // 최대 10개 검색
+    urlQuery.addQueryItem("size", "10");   
     urlQuery.addQueryItem("page", "1");
-    urlQuery.addQueryItem("type", "place"); // 장소 검색
+    urlQuery.addQueryItem("type", "place"); 
     urlQuery.addQueryItem("query", query);
     urlQuery.addQueryItem("format", "json");
-    urlQuery.addQueryItem("key", "C976EFA0-5CEE-32C0-8A42-699FE3E12546"); // << API KEY
+
+    // 하드코딩 API 키 대신 환경 변수 사용
+    urlQuery.addQueryItem("key", getVWorldApiKey());
+
     url.setQuery(urlQuery);
 
     qDebug() << "Request URL:" << url.toString();
