@@ -465,6 +465,31 @@ Item {
                 }
             }
 
+
+            // PlanMasterController 신호 처리
+            Connections {
+                target: planMasterController
+                onPanAndZoomMap: (latitude, longitude, zoomLevel) => {
+                    console.log("Received panAndZoomMap: lat=" + latitude + ", lon=" + longitude + ", zoom=" + zoomLevel)
+                    var coordinate = QtPositioning.coordinate(latitude, longitude)
+                    // 좌표 유효성 검사
+                    if (typeof coordinate.isValid === 'function' && coordinate.isValid()) {
+                        editorMap.center = coordinate
+                        editorMap.zoomLevel = zoomLevel
+                    } else {
+                        console.log("Invalid coordinate received in panAndZoomMap: lat=" + latitude + ", lon=" + longitude)
+                    }
+                }
+                onErrorMessage: (message) => {
+                    console.log("Received errorMessage: " + message)
+                    mainWindow.showMessageDialog(qsTr("주소 검색 오류"), message, StandardButton.Ok)
+                }
+                onPlanReadyForViewing: {
+                    console.log("Received planReadyForViewing signal")
+                    mapFitFunctions.fitMapViewportToMissionItems()
+                }
+            }
+
             // Add the mission item visuals to the map
             Repeater {
                 model: _missionController.visualItems
@@ -768,52 +793,73 @@ Item {
         }
 
         // 시그널 연결
-        Connections {
-            target: searchPanel
-            onRequestAddWaypoint: {
-                var coordinate = QtPositioning.coordinate(lat, lon)
-                if (_visualItems.count === 0) {
-                    insertTakeoffItemAfterCurrent(coordinate)
-                } else {
-                    insertSimpleItemAfterCurrent(coordinate)
-                }
-            }
-        }
-
         Column {
             id: cadastralSearchPanel
             width: 300
             spacing: 10
             visible: false
-
-            property var planMasterController
-
             anchors {
-                top: parent.top       // PlanView 맨 위 기준
-                left: toolStrip.right     // 왼쪽 고정
-                margins: 10           // 살짝 안쪽으로 띄움 (툴바랑 겹치지 않게)
+                top: parent.top
+                left: toolStrip.right
+                margins: 10
             }
 
+            // 도로명 주소 검색
+            QGCLabel {
+                text: qsTr("도로명 주소 검색")
+            }
             QGCTextField {
-                id: streetTextField
+                id: roadTextField
                 width: parent.width
-                placeholderText: qsTr("지적도 주소 검색")
-
+                placeholderText: qsTr("도로명 주소를 입력하세요")
                 onAccepted: {
                     if (text.length > 0) {
-                        planMasterController.findCadastralAndCreateSurvey(text)
+                        _planMasterController.findCadastralAndCreateSurvey(text)
                         cadastralSearchPanel.visible = false
+                    } else {
+                        mainWindow.showMessageDialog(qsTr("주소 검색 오류"), qsTr("잘못된 주소: 도로명 주소를 입력하세요."), StandardButton.Ok)
+                    }
+                }
+            }
+            QGCButton {
+                text: qsTr("도로명 검색")
+                width: parent.width
+                onClicked: {
+                    if (roadTextField.text.length > 0) {
+                        _planMasterController.findCadastralAndCreateSurvey(roadTextField.text)
+                        cadastralSearchPanel.visible = false
+                    } else {
+                        mainWindow.showMessageDialog(qsTr("주소 검색 오류"), qsTr("잘못된 주소: 도로명 주소를 입력하세요."), StandardButton.Ok)
                     }
                 }
             }
 
+            // 지번 주소 검색
+            QGCLabel {
+                text: qsTr("지번 주소 검색")
+            }
+            QGCTextField {
+                id: streetTextField
+                width: parent.width
+                placeholderText: qsTr("지번 주소를 입력하세요")
+                onAccepted: {
+                    if (text.length > 0) {
+                        _planMasterController.searchStreet(text)
+                        cadastralSearchPanel.visible = false
+                    } else {
+                        mainWindow.showMessageDialog(qsTr("주소 검색 오류"), qsTr("잘못된 주소: 지번 주소를 입력하세요."), StandardButton.Ok)
+                    }
+                }
+            }
             QGCButton {
-                text: qsTr("Search")
+                text: qsTr("지번 검색")
                 width: parent.width
                 onClicked: {
                     if (streetTextField.text.length > 0) {
-                        planMasterController.findCadastralAndCreateSurvey(streetTextField.text)
+                        _planMasterController.searchStreet(streetTextField.text)
                         cadastralSearchPanel.visible = false
+                    } else {
+                        mainWindow.showMessageDialog(qsTr("주소 검색 오류"), qsTr("잘못된 주소: 지번 주소를 입력하세요."), StandardButton.Ok)
                     }
                 }
             }
@@ -1339,52 +1385,63 @@ Item {
                 }
 
                 // === Plan 파일 버튼 ===
-                        SectionHeader {
-                            id: missionFilesSection
+                // Favorite Mission 섹션 헤더
+                SectionHeader {
+                    id: missionFilesSection
+                    Layout.fillWidth: true                 // 가로 전체 폭 사용
+                    text: qsTr("Favorite Mission")         // 헤더 텍스트
+                    checked: true                          // 기본 펼쳐진 상태
+                }
+
+                // Favorite Mission 파일 목록
+                ColumnLayout {
+                    spacing: _margin                        // 버튼 간 간격
+                    visible: missionFilesSection.checked    // 헤더 체크 여부에 따라 표시
+
+                    // Mission 파일 모델
+                    FolderListModel {
+                        id: folderModel
+                        folder: "file:///home/awesome-tech/Documents/QGroundControl awesome-tech/Missions"
+                        nameFilters: ["*.plan"]           // .plan 파일만
+                        showDirs: false                    // 폴더는 표시하지 않음
+                        showFiles: true                    // 파일만 표시
+                        sortField: FolderListModel.Name   // 이름 기준 정렬
+                    }
+
+                    // Mission 파일 버튼 반복 생성
+                    Repeater {
+                        model: folderModel
+                        QGCButton {
                             Layout.fillWidth: true
-                            text: qsTr("Favorite Mission")
-                            checked: true
-                        }
+                            text: fileName.replace(".plan", "")   // 버튼 텍스트: 파일명에서 .plan 제거
+                            onClicked: {
+                                var filePath = folderModel.folder.toString().replace("file://", "") + "/" + fileName
 
-                        ColumnLayout {
-                            spacing: _margin
-                            visible: missionFilesSection.checked
+                                // 1️⃣ 파일 로드
+                                _planMasterController.loadFromFile(filePath)
 
-                            FolderListModel {
-                                id: folderModel
-                                folder: "file:///home/awesome-tech/Documents/QGroundControl awesome-tech/Missions"
-                                nameFilters: ["*.plan"]
-                                showDirs: false
-                                showFiles: true
-                                sortField: FolderListModel.Name
-                            }
+                                // 2️⃣ 미션 첫 항목 선택
+                                _missionController.setCurrentPlanViewSeqNum(0, true)
 
-                            Repeater {
-                                model: folderModel
-                                QGCButton {
-                                    Layout.fillWidth: true
-                                    text: fileName.replace(".plan", "")
-                                    onClicked: {
-                                        var filePath = folderModel.folder.toString().replace("file://", "") + "/" + fileName
-                                        _planMasterController.loadFromFile(filePath)
-                                        _missionController.setCurrentPlanViewSeqNum(0, true)
+                                // 3️⃣ Mission 전체 중심으로 화면 이동
+                                _planMasterController.fitViewportToItems()
 
-                                        var firstCoord = _missionController.visualItems.get(0).coordinate
-                                        if (firstCoord && firstCoord.isValid) {
-                                            editorMap.center = firstCoord
-                                            editorMap.zoomLevel = 16
-                                        }
-                                        dropPanel.hide()
-                                    }
-                                }
-                            }
+                                // 4️⃣ 추가 줌 아웃
+                                editorMap.zoomLevel = editorMap.zoomLevel - 1   // 필요에 따라 조정
 
-                            QGCLabel {
-                                Layout.fillWidth: true
-                                wrapMode: Text.Wrap
-                                text: "Mission Files Path: " + (folderModel.folder.toString() ? folderModel.folder.toString().replace("file://", "") : "Not set")
+                                // 5️⃣ 드롭다운 패널 닫기
+                                dropPanel.hide()
                             }
                         }
+                    }
+
+                    // Mission 파일 경로 표시
+                    QGCLabel {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: "Mission Files Path: " + (folderModel.folder.toString() ? folderModel.folder.toString().replace("file://", "") : "Not set")
+                    }
+                }
 
                 SectionHeader {
                     id:                 vehicleSection

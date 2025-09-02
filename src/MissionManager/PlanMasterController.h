@@ -121,6 +121,7 @@ signals:
     void panAndZoomMap                      (double latitude, double longitude, int zoomLevel);
     void planReadyForViewing                (void);
     void streetResultsChanged               (void);
+    void errorMessage(const QString& message); // 추가: 에러 메시지 신호
 
 private slots:
     void _activeVehicleChanged      (Vehicle* activeVehicle);
@@ -136,6 +137,7 @@ private slots:
 private:
     void _commonInit                (void);
     void _showPlanFromManagerVehicle(void);
+    QGeoCoordinate calculatePolygonCenter(const QList<QGeoCoordinate>& polygonPoints); // 추가: 폴리곤 중심 계산 헬퍼
 
     MultiVehicleManager* _multiVehicleMgr =          nullptr;
     Vehicle* _controllerVehicle =        nullptr;

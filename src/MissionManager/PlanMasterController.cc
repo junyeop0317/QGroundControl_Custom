@@ -671,162 +671,333 @@ void PlanMasterController::showPlanFromManagerVehicle(void)
     }
 }
 
+
+// 폴리곤 중심 계산 헬퍼 함수
+QGeoCoordinate PlanMasterController::calculatePolygonCenter(const QList<QGeoCoordinate>& polygonPoints) {
+    double latSum = 0.0, lonSum = 0.0;
+    int count = polygonPoints.size();
+    if (count < 3) {
+        qCWarning(PlanMasterControllerLog) << "calculatePolygonCenter: Insufficient polygon points:" << count;
+        return QGeoCoordinate();
+    }
+    for (const QGeoCoordinate& coord : polygonPoints) {
+        latSum += coord.latitude();
+        lonSum += coord.longitude();
+    }
+    QGeoCoordinate center(latSum / count, lonSum / count);
+    qCDebug(PlanMasterControllerLog) << "Calculated polygon center: lat=" << center.latitude() << "lon=" << center.longitude();
+    return center;
+}
+
+
+
+
 void PlanMasterController::searchAndGo(const QString& address, bool panAfterSearch) {
-    if (address.length() < 2) {
+    // 주소 입력 검증
+    if (address.trimmed().isEmpty() || address.length() < 2) {
+        qCWarning(PlanMasterControllerLog) << "Invalid address input: Empty or too short";
+        emit errorMessage(tr("잘못된 주소: 주소를 입력하세요 (최소 2자 이상)."));
         emit suggestionsReady({});
         return;
     }
+
     QByteArray apiKey = qgetenv("v_world_key");
+    if (apiKey.isEmpty()) {
+        qCWarning(PlanMasterControllerLog) << "v_world_key is not set";
+        emit errorMessage(tr("V-World API 키가 설정되지 않았습니다."));
+        emit suggestionsReady({});
+        return;
+    }
+
     QString requestUrl = QString("https://api.vworld.kr/req/search?service=search&request=search&version=2.0&query=%1&type=place&format=json&errorformat=json&key=%2")
-                             .arg(QUrl::toPercentEncoding(address))
-                             .arg(QString(apiKey));
-   
+                            .arg(QUrl::toPercentEncoding(address))
+                            .arg(QString(apiKey));
+    qCDebug(PlanMasterControllerLog) << "V-World 요청 URL:" << requestUrl;
+
     QNetworkAccessManager* manager = new QNetworkAccessManager(this);
     QNetworkRequest request{QUrl(requestUrl)};
     QNetworkReply* reply = manager->get(request);
     connect(reply, &QNetworkReply::finished, this, [this, reply, panAfterSearch, manager]() {
         QVariantList suggestions;
         QSet<QString> addedTitles;
-        if (reply->error() == QNetworkReply::NoError) {
-            QByteArray responseData = reply->readAll();
-            QJsonDocument doc = QJsonDocument::fromJson(responseData);
-            QJsonObject response = doc.object().value("response").toObject();
-            if (response.value("status").toString() == "OK") {
-                if (response.value("result").toObject().contains("items")) {
-                    QJsonArray items = response.value("result").toObject().value("items").toArray();
-                    if (panAfterSearch && !items.isEmpty()) {
-                        QJsonObject firstItem = items[0].toObject();
-                        QJsonObject point = firstItem.value("point").toObject();
-                        double lon = point.value("x").toString().toDouble();
-                        double lat = point.value("y").toString().toDouble();
-                        addWaypointAndZoom(lat, lon);
-                    }
-                    for (const QJsonValue &value : items) {
-                        QJsonObject item = value.toObject();
-                        QString title = item.value("title").toString();
-                        if (!addedTitles.contains(title)) {
-                            QJsonObject point = item.value("point").toObject();
-                            QVariantMap suggestionItem;
-                            suggestionItem["title"] = title;
-                            suggestionItem["longitude"] = point.value("x").toString().toDouble();
-                            suggestionItem["latitude"] = point.value("y").toString().toDouble();
-                            suggestions.append(suggestionItem);
-                            addedTitles.insert(title);
-                        }
-                    }
+        if (reply->error() != QNetworkReply::NoError) {
+            qCWarning(PlanMasterControllerLog) << "Search API error:" << reply->errorString();
+            emit errorMessage(tr("네트워크 오류: %1").arg(reply->errorString()));
+            emit suggestionsReady(suggestions);
+            reply->deleteLater();
+            manager->deleteLater();
+            return;
+        }
+
+        QByteArray responseData = reply->readAll();
+        qCDebug(PlanMasterControllerLog) << "Search API response:" << QString(responseData);
+        QJsonDocument doc = QJsonDocument::fromJson(responseData);
+        if (doc.isNull() || !doc.isObject()) {
+            qCWarning(PlanMasterControllerLog) << "Invalid JSON response from search API";
+            emit errorMessage(tr("잘못된 주소: 검색 API 응답을 파싱할 수 없습니다."));
+            emit suggestionsReady(suggestions);
+            reply->deleteLater();
+            manager->deleteLater();
+            return;
+        }
+
+        QJsonObject response = doc.object().value("response").toObject();
+        if (response.value("status").toString() != "OK") {
+            qCWarning(PlanMasterControllerLog) << "Search API status not OK:" << response.value("status").toString();
+            emit errorMessage(tr("잘못된 주소: 검색 결과가 없습니다."));
+            emit suggestionsReady(suggestions);
+            reply->deleteLater();
+            manager->deleteLater();
+            return;
+        }
+
+        if (response.value("result").toObject().contains("items")) {
+            QJsonArray items = response.value("result").toObject().value("items").toArray();
+            if (items.isEmpty()) {
+                qCWarning(PlanMasterControllerLog) << "No items found in search API response";
+                emit errorMessage(tr("잘못된 주소: 검색 결과가 없습니다."));
+                emit suggestionsReady(suggestions);
+                reply->deleteLater();
+                manager->deleteLater();
+                return;
+            }
+
+            if (panAfterSearch) {
+                QJsonObject firstItem = items[0].toObject();
+                QJsonObject point = firstItem.value("point").toObject();
+                double lon = point.value("x").toString().toDouble();
+                double lat = point.value("y").toString().toDouble();
+                if (!qIsNaN(lon) && !qIsNaN(lat)) {
+                    addWaypointAndZoom(lat, lon);
+                } else {
+                    qCWarning(PlanMasterControllerLog) << "Invalid coordinates in search API response";
+                    emit errorMessage(tr("잘못된 주소: 유효하지 않은 좌표가 반환되었습니다."));
                 }
-            } 
-        } 
-       
+            }
+
+            for (const QJsonValue &value : items) {
+                QJsonObject item = value.toObject();
+                QString title = item.value("title").toString();
+                if (!addedTitles.contains(title)) {
+                    QJsonObject point = item.value("point").toObject();
+                    QVariantMap suggestionItem;
+                    suggestionItem["title"] = title;
+                    suggestionItem["longitude"] = point.value("x").toString().toDouble();
+                    suggestionItem["latitude"] = point.value("y").toString().toDouble();
+                    suggestions.append(suggestionItem);
+                    addedTitles.insert(title);
+                }
+            }
+        } else {
+            qCWarning(PlanMasterControllerLog) << "No items found in search API response";
+            emit errorMessage(tr("잘못된 주소: 검색 결과가 없습니다."));
+        }
+
+        qCDebug(PlanMasterControllerLog) << "QML로 추천 목록 신호 보냄. 개수:" << suggestions.count();
         emit suggestionsReady(suggestions);
         reply->deleteLater();
         manager->deleteLater();
     });
 }
 
-
-void PlanMasterController::addWaypointAndZoom(double latitude, double longitude)
-{
-    QGeoCoordinate coordinate(latitude, longitude);
-    int nextIndex = _missionController.currentPlanViewVIIndex() + 1;
-    _missionController.insertSimpleMissionItem(coordinate, nextIndex, true);
-   
-    emit panAndZoomMap(coordinate.latitude(), coordinate.longitude(), 15);
-}
-
-void PlanMasterController::findCadastralAndCreateSurvey(const QString& address)
-{
-    QByteArray apiKey = qgetenv("v_world_key");
-    if (apiKey.isEmpty()) {
-        qCWarning(PlanControllerLog) << "v_world_key is not connect";
-
+void PlanMasterController::addWaypointAndZoom(double latitude, double longitude) {
+    if (qIsNaN(latitude) || qIsNaN(longitude)) {
+        qCWarning(PlanMasterControllerLog) << "Invalid coordinates for waypoint: lat=" << latitude << "lon=" << longitude;
+        emit errorMessage(tr("잘못된 주소: 유효하지 않은 좌표입니다."));
         return;
     }
 
+    QGeoCoordinate coordinate(latitude, longitude);
+    if (!coordinate.isValid()) {
+        qCWarning(PlanMasterControllerLog) << "Invalid QGeoCoordinate: lat=" << latitude << "lon=" << longitude;
+        emit errorMessage(tr("잘못된 주소: 유효하지 않은 좌표입니다."));
+        return;
+    }
 
+    int nextIndex = _missionController.currentPlanViewVIIndex() + 1;
+    _missionController.insertSimpleMissionItem(coordinate, nextIndex, true);
 
-            // VWorld 주소 검색 API -> 주소를 좌표로 변환
+    qCDebug(PlanMasterControllerLog) << "Emitting panAndZoomMap signal to QML with lat:" << coordinate.latitude() << "lon:" << coordinate.longitude() << "zoom:" << 15;
+    emit panAndZoomMap(coordinate.latitude(), coordinate.longitude(), 15);
+}
+
+void PlanMasterController::findCadastralAndCreateSurvey(const QString& address) {
+    // 주소 입력 검증
+    if (address.trimmed().isEmpty()) {
+        qCWarning(PlanMasterControllerLog) << "Invalid address input: Empty";
+        emit errorMessage(tr("잘못된 주소: 주소를 입력하세요."));
+        return;
+    }
+
+    QByteArray apiKey = qgetenv("v_world_key");
+    if (apiKey.isEmpty()) {
+        qCWarning(PlanMasterControllerLog) << "v_world_key is not set";
+        emit errorMessage(tr("V-World API 키가 설정되지 않았습니다."));
+        return;
+    }
+
+    qCDebug(PlanMasterControllerLog) << "Starting cadastral search for address:" << address;
+
+    // 1단계: VWorld 주소 검색 API - 주소를 좌표로 변환
     QString searchUrl = QString("https://api.vworld.kr/req/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&address=%1&format=json&type=road&key=%2")
                             .arg(QUrl::toPercentEncoding(address))
                             .arg(QString(apiKey));
-
-
+    qCDebug(PlanMasterControllerLog) << "Step 1 - Search URL:" << searchUrl;
 
     QNetworkAccessManager* searchManager = new QNetworkAccessManager(this);
     connect(searchManager, &QNetworkAccessManager::finished, searchManager, &QObject::deleteLater);
     QNetworkReply* searchReply = searchManager->get(QNetworkRequest(QUrl(searchUrl)));
-
     connect(searchReply, &QNetworkReply::finished, this, [this, searchReply, apiKey, address]() {
         searchReply->deleteLater();
 
-
+        if (searchReply->error() != QNetworkReply::NoError) {
+            qCWarning(PlanMasterControllerLog) << "Step 1 Network error:" << searchReply->errorString();
+            emit errorMessage(tr("네트워크 오류: %1").arg(searchReply->errorString()));
+            return;
+        }
 
         QByteArray responseData = searchReply->readAll();
-
+        qCDebug(PlanMasterControllerLog) << "Step 1 Response:" << QString(responseData);
 
         QJsonDocument doc = QJsonDocument::fromJson(responseData);
+        if (doc.isNull() || !doc.isObject()) {
+            qCWarning(PlanMasterControllerLog) << "Invalid JSON response from address API";
+            emit errorMessage(tr("잘못된 주소: API 응답을 파싱할 수 없습니다."));
+            return;
+        }
+
         QJsonObject response = doc.object().value("response").toObject();
-
-
+        if (response.value("status").toString() != "OK") {
+            qCWarning(PlanMasterControllerLog) << "Step 1 API Error - Status:" << response.value("status").toString();
+            emit errorMessage(tr("잘못된 주소: 주소를 찾을 수 없습니다."));
+            return;
+        }
 
         QJsonObject result = response.value("result").toObject();
+        if (!result.contains("point")) {
+            qCWarning(PlanMasterControllerLog) << "Step 1 - No point data in response";
+            emit errorMessage(tr("잘못된 주소: 좌표 데이터를 찾을 수 없습니다."));
+            return;
+        }
 
-
-        // VWorld API 응답에서 좌표 추출
         QJsonObject point = result.value("point").toObject();
+        if (!point.contains("x") || !point.contains("y")) {
+            qCWarning(PlanMasterControllerLog) << "Invalid coordinates in address API response";
+            emit errorMessage(tr("잘못된 주소: 유효하지 않은 좌표가 반환되었습니다."));
+            return;
+        }
+
         double lon = point.value("x").toString().toDouble();
         double lat = point.value("y").toString().toDouble();
+        if (qIsNaN(lon) || qIsNaN(lat)) {
+            qCWarning(PlanMasterControllerLog) << "Invalid coordinate values for address:" << address;
+            emit errorMessage(tr("잘못된 주소: 유효하지 않은 좌표 값입니다."));
+            return;
+        }
 
+        qCDebug(PlanMasterControllerLog) << "Step 1 Success - Found coordinates: Lat=" << lat << "Lon=" << lon;
 
-
-                //VWorld 지적도 API - 해당 좌표의 토지 경계 폴리곤 검색
-        QString cadastralUrl = QString("https://api.vworld.kr/req/data?service=data&version=2.0&request=GetFeature&format=json&size=1000&page=1&geometry=true&attribute=true&crs=EPSG:4326&geomFilter=POINT(%1 %2)&data=LT_C_SPBD&key=%3")
+        // 2단계: VWorld 지적도 API - 해당 좌표의 토지 경계 폴리곤 검색
+        QString cadastralUrl = QString("https://api.vworld.kr/req/data?service=data&version=2.0&request=GetFeature&format=json&size=1000&page=1&geometry=true&attribute=true&crs=EPSG:4326&geomFilter=POINT(%1 %2)&data=LP_PA_CBND_BUBUN&key=%3")
                                    .arg(lon).arg(lat).arg(QString(apiKey));
-
+        qCDebug(PlanMasterControllerLog) << "Step 2 - Cadastral URL:" << cadastralUrl;
 
         QNetworkAccessManager* cadastralManager = new QNetworkAccessManager(this);
         connect(cadastralManager, &QNetworkAccessManager::finished, cadastralManager, &QObject::deleteLater);
         QNetworkReply* cadastralReply = cadastralManager->get(QNetworkRequest(QUrl(cadastralUrl)));
-
         connect(cadastralReply, &QNetworkReply::finished, this, [this, cadastralReply, address]() {
             cadastralReply->deleteLater();
 
-            QByteArray cadastralResponseData = cadastralReply->readAll();
-            QJsonDocument cadastralDoc = QJsonDocument::fromJson(cadastralResponseData);
-            QJsonObject cadastralResponse = cadastralDoc.object().value("response").toObject();
-            QJsonArray features = cadastralResponse.value("result").toObject()
-                                      .value("featureCollection").toObject()
-                                      .value("features").toArray();
+            if (cadastralReply->error() != QNetworkReply::NoError) {
+                qCWarning(PlanMasterControllerLog) << "Step 2 Network error:" << cadastralReply->errorString();
+                emit errorMessage(tr("지적도 데이터를 가져오지 못했습니다: %1").arg(cadastralReply->errorString()));
+                return;
+            }
 
-           
+            QByteArray cadastralResponseData = cadastralReply->readAll();
+            qCDebug(PlanMasterControllerLog) << "Step 2 Response:" << QString(cadastralResponseData);
+
+            QJsonDocument cadastralDoc = QJsonDocument::fromJson(cadastralResponseData);
+            if (cadastralDoc.isNull() || !cadastralDoc.isObject()) {
+                qCWarning(PlanMasterControllerLog) << "Invalid JSON response from cadastral API";
+                emit errorMessage(tr("잘못된 주소: 지적도 API 응답을 파싱할 수 없습니다."));
+                return;
+            }
+
+            QJsonObject cadastralResponse = cadastralDoc.object().value("response").toObject();
+            if (cadastralResponse.value("status").toString() != "OK") {
+                qCWarning(PlanMasterControllerLog) << "Step 2 API Error - Status:" << cadastralResponse.value("status").toString();
+                emit errorMessage(tr("지적도 데이터를 찾을 수 없습니다."));
+                return;
+            }
+
+            QJsonArray features = cadastralResponse.value("result").toObject().value("featureCollection").toObject().value("features").toArray();
+            if (features.isEmpty()) {
+                qCWarning(PlanMasterControllerLog) << "No features found in cadastral data for address:" << address;
+                emit errorMessage(tr("지정된 위치에서 지적도 데이터를 찾을 수 없습니다."));
+                return;
+            }
 
             QJsonObject firstFeature = features[0].toObject();
+            QJsonObject properties = firstFeature.value("properties").toObject();
+            QString pnu = properties.value("pnu").toString();
+            QString jimok = properties.value("jimok_nm").toString();
+            qCDebug(PlanMasterControllerLog) << "Step 2 Success - PNU:" << pnu << "Land Type:" << jimok;
+
             QJsonObject geometry = firstFeature.value("geometry").toObject();
+            if (!geometry.contains("type") || !geometry.contains("coordinates")) {
+                qCWarning(PlanMasterControllerLog) << "Invalid geometry in cadastral data";
+                emit errorMessage(tr("잘못된 주소: 유효하지 않은 지적도 데이터입니다."));
+                return;
+            }
+
             QString geomType = geometry.value("type").toString();
             QJsonArray coordinates = geometry.value("coordinates").toArray();
-
             QList<QGeoCoordinate> polygonPoints;
-
             if (geomType == "Polygon") {
                 QJsonArray polygonRing = coordinates[0].toArray();
+                qCDebug(PlanMasterControllerLog) << "Processing Polygon with" << polygonRing.size() << "boundary points";
                 for (const QJsonValue& pointValue : polygonRing) {
                     QJsonArray point = pointValue.toArray();
                     if (point.size() >= 2) {
-                        polygonPoints.append(QGeoCoordinate(point[1].toDouble(), point[0].toDouble()));
+                        double longitude = point[0].toDouble();
+                        double latitude = point[1].toDouble();
+                        QGeoCoordinate coord(latitude, longitude);
+                        if (coord.isValid()) {
+                            polygonPoints.append(coord);
+                        }
                     }
                 }
             } else if (geomType == "MultiPolygon") {
-                QJsonArray polygonRing = coordinates[0].toArray()[0].toArray();
+                QJsonArray firstPolygon = coordinates[0].toArray();
+                QJsonArray polygonRing = firstPolygon[0].toArray();
+                qCDebug(PlanMasterControllerLog) << "Processing MultiPolygon with" << polygonRing.size() << "boundary points";
                 for (const QJsonValue& pointValue : polygonRing) {
                     QJsonArray point = pointValue.toArray();
                     if (point.size() >= 2) {
-                        polygonPoints.append(QGeoCoordinate(point[1].toDouble(), point[0].toDouble()));
+                        double longitude = point[0].toDouble();
+                        double latitude = point[1].toDouble();
+                        QGeoCoordinate coord(latitude, longitude);
+                        if (coord.isValid()) {
+                            polygonPoints.append(coord);
+                        }
                     }
                 }
+            } else {
+                qCWarning(PlanMasterControllerLog) << "Unsupported geometry type:" << geomType;
+                emit errorMessage(tr("지원되지 않는 지적도 형상입니다: %1").arg(geomType));
+                return;
             }
 
-            
+            if (polygonPoints.size() < 3) {
+                qCWarning(PlanMasterControllerLog) << "Insufficient boundary points for survey creation:" << polygonPoints.size();
+                emit errorMessage(tr("Survey 생성에 필요한 경계점이 부족합니다."));
+                return;
+            }
 
+            qCDebug(PlanMasterControllerLog) << "Successfully parsed" << polygonPoints.size() << "valid boundary points";
+
+            // Survey 미션 생성
             int nextIndex = _missionController.currentPlanViewVIIndex() + 1;
             _missionController.insertComplexMissionItem("Survey", polygonPoints.first(), nextIndex, true);
 
@@ -837,39 +1008,437 @@ void PlanMasterController::findCadastralAndCreateSurvey(const QString& address)
                     QGCMapPolygon* polygon = surveyItem->surveyAreaPolygon();
                     if (polygon) {
                         polygon->setPath(polygonPoints);
+                        qCDebug(PlanMasterControllerLog) << "Successfully set survey area polygon with" << polygonPoints.size() << "points";
+                    } else {
+                        qCWarning(PlanMasterControllerLog) << "Failed to get surveyAreaPolygon from SurveyComplexItem";
+                        emit errorMessage(tr("Survey 영역 폴리곤을 설정하지 못했습니다."));
                     }
+                } else {
+                    qCWarning(PlanMasterControllerLog) << "Failed to cast VisualMissionItem to SurveyComplexItem";
+                    emit errorMessage(tr("Survey 미션 아이템으로 변환하지 못했습니다."));
                 }
-            }
 
-                    // 지도 화면 이동은 항상 호출
-            emit planReadyForViewing();
-        }); //
+                qCDebug(PlanMasterControllerLog) << "Successfully created Survey mission with" << polygonPoints.size() << "boundary points";
+                emit errorMessage(tr("Survey 미션이 생성되었습니다: %1 (PNU: %2)").arg(address, pnu));
+
+                // 폴리곤 중심으로 지도 이동
+                QGeoCoordinate center = calculatePolygonCenter(polygonPoints);
+                if (center.isValid()) {
+                    // 동적 줌 레벨 계산
+                    double maxDistance = 0.0;
+                    for (int i = 0; i < polygonPoints.size(); ++i) {
+                        for (int j = i + 1; j < polygonPoints.size(); ++j) {
+                            double distance = polygonPoints[i].distanceTo(polygonPoints[j]);
+                            maxDistance = qMax(maxDistance, distance);
+                        }
+                    }
+                    int zoomLevel = maxDistance > 1000 ? 13 : maxDistance > 500 ? 14 : 15;
+                    qCDebug(PlanMasterControllerLog) << "Emitting panAndZoomMap signal to QML with lat:" << center.latitude() << "lon:" << center.longitude() << "zoom:" << zoomLevel;
+                    emit panAndZoomMap(center.latitude(), center.longitude(), zoomLevel);
+                } else {
+                    qCWarning(PlanMasterControllerLog) << "Invalid polygon center for address:" << address;
+                    emit errorMessage(tr("폴리곤 중심을 계산할 수 없습니다."));
+                }
+                emit planReadyForViewing();
+            } else {
+                qCWarning(PlanMasterControllerLog) << "Failed to create Survey mission item";
+                emit errorMessage(tr("Survey 미션 생성에 실패했습니다."));
+            }
+        });
     });
 }
 
-QVariantList PlanMasterController::streetResults() const
-{
+QVariantList PlanMasterController::streetResults() const {
     return _streetResults;
 }
 
-void PlanMasterController::searchStreet(const QString& jibunText)
-{
-    // 리스트 초기화
-    _streetResults.clear();
-    
-    QVariantMap item;
-    item["id"] = jibunText;
-    item["name"] = QString("지번: %1").arg(jibunText);
+void PlanMasterController::searchStreet(const QString& jibunText) {
+    // 입력 검증
+    if (jibunText.trimmed().isEmpty()) {
+        qCWarning(PlanMasterControllerLog) << "Invalid jibun address input: Empty";
+        emit errorMessage(tr("잘못된 주소: 지번을 입력하세요."));
+        return;
+    }
 
-    _streetResults.append(item);
+    QByteArray apiKey = qgetenv("v_world_key");
+    if (apiKey.isEmpty()) {
+        qCWarning(PlanMasterControllerLog) << "v_world_key is not set";
+        emit errorMessage(tr("V-World API 키가 설정되지 않았습니다."));
+        return;
+    }
 
-    emit streetResultsChanged();
+    qCDebug(PlanMasterControllerLog) << "Starting cadastral search for jibun address:" << jibunText;
 
-            
+    // 1단계: VWorld 주소 검색 API - 지번 주소를 좌표로 변환
+    QString searchUrl = QString("https://api.vworld.kr/req/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&address=%1&format=json&type=parcel&key=%2")
+                            .arg(QUrl::toPercentEncoding(jibunText))
+                            .arg(QString(apiKey));
+    qCDebug(PlanMasterControllerLog) << "Step 1 - Search URL:" << searchUrl;
+
+    QNetworkAccessManager* searchManager = new QNetworkAccessManager(this);
+    connect(searchManager, &QNetworkAccessManager::finished, searchManager, &QObject::deleteLater);
+    QNetworkReply* searchReply = searchManager->get(QNetworkRequest(QUrl(searchUrl)));
+    connect(searchReply, &QNetworkReply::finished, this, [this, searchReply, apiKey, jibunText]() {
+        searchReply->deleteLater();
+
+        if (searchReply->error() != QNetworkReply::NoError) {
+            qCWarning(PlanMasterControllerLog) << "Step 1 Network error:" << searchReply->errorString();
+            emit errorMessage(tr("네트워크 오류: %1").arg(searchReply->errorString()));
+            return;
+        }
+
+        QByteArray responseData = searchReply->readAll();
+        qCDebug(PlanMasterControllerLog) << "Step 1 Response:" << QString(responseData);
+
+        QJsonDocument doc = QJsonDocument::fromJson(responseData);
+        if (doc.isNull() || !doc.isObject()) {
+            qCWarning(PlanMasterControllerLog) << "Invalid JSON response from address API";
+            emit errorMessage(tr("잘못된 주소: API 응답을 파싱할 수 없습니다."));
+            return;
+        }
+
+        QJsonObject response = doc.object().value("response").toObject();
+        if (response.value("status").toString() != "OK") {
+            qCWarning(PlanMasterControllerLog) << "Step 1 API Error - Status:" << response.value("status").toString();
+            emit errorMessage(tr("잘못된 주소: 지번 주소를 찾을 수 없습니다."));
+            return;
+        }
+
+        QJsonObject result = response.value("result").toObject();
+        if (!result.contains("point")) {
+            qCWarning(PlanMasterControllerLog) << "Step 1 - No point data in response";
+            emit errorMessage(tr("잘못된 주소: 좌표 데이터를 찾을 수 없습니다."));
+            return;
+        }
+
+        QJsonObject point = result.value("point").toObject();
+        double lon = point.value("x").toString().toDouble();
+        double lat = point.value("y").toString().toDouble();
+        if (qIsNaN(lon) || qIsNaN(lat)) {
+            qCWarning(PlanMasterControllerLog) << "Invalid coordinate values for address:" << jibunText;
+            emit errorMessage(tr("잘못된 주소: 유효하지 않은 좌표 값입니다."));
+            return;
+        }
+
+        qCDebug(PlanMasterControllerLog) << "Step 1 Success - Found coordinates: Lat=" << lat << "Lon=" << lon;
+
+        // 2단계: VWorld 지적도 API - 좌표로 LP_PA_CBND_BUBUN 데이터 요청
+        QString cadastralUrl = QString("https://api.vworld.kr/req/data?service=data&version=2.0&request=GetFeature&format=json&size=10&page=1&geometry=true&attribute=true&crs=EPSG:4326&geomFilter=POINT(%1 %2)&data=LP_PA_CBND_BUBUN&key=%3")
+                                   .arg(lon).arg(lat).arg(QString(apiKey));
+        qCDebug(PlanMasterControllerLog) << "Step 2 - Cadastral URL:" << cadastralUrl;
+
+        QNetworkAccessManager* cadastralManager = new QNetworkAccessManager(this);
+        connect(cadastralManager, &QNetworkAccessManager::finished, cadastralManager, &QObject::deleteLater);
+        QNetworkReply* cadastralReply = cadastralManager->get(QNetworkRequest(QUrl(cadastralUrl)));
+        connect(cadastralReply, &QNetworkReply::finished, this, [this, cadastralReply, jibunText]() {
+            cadastralReply->deleteLater();
+
+            if (cadastralReply->error() != QNetworkReply::NoError) {
+                qCWarning(PlanMasterControllerLog) << "Step 2 Network error:" << cadastralReply->errorString();
+                emit errorMessage(tr("지적도 데이터를 가져오지 못했습니다: %1").arg(cadastralReply->errorString()));
+                return;
+            }
+
+            QByteArray cadastralResponseData = cadastralReply->readAll();
+            qCDebug(PlanMasterControllerLog) << "Step 2 Response:" << QString(cadastralResponseData);
+
+            QJsonDocument cadastralDoc = QJsonDocument::fromJson(cadastralResponseData);
+            if (cadastralDoc.isNull() || !cadastralDoc.isObject()) {
+                qCWarning(PlanMasterControllerLog) << "Invalid JSON response from cadastral API";
+                emit errorMessage(tr("잘못된 주소: 지적도 API 응답을 파싱할 수 없습니다."));
+                return;
+            }
+
+            QJsonObject cadastralResponse = cadastralDoc.object().value("response").toObject();
+            if (cadastralResponse.value("status").toString() != "OK") {
+                qCWarning(PlanMasterControllerLog) << "Step 2 API Error - Status:" << cadastralResponse.value("status").toString();
+                emit errorMessage(tr("지적도 데이터를 찾을 수 없습니다."));
+                return;
+            }
+
+            QJsonArray features = cadastralResponse.value("result").toObject().value("featureCollection").toObject().value("features").toArray();
+            if (features.isEmpty()) {
+                qCWarning(PlanMasterControllerLog) << "No features found in cadastral data for address:" << jibunText;
+                emit errorMessage(tr("지정된 지번에서 지적도 데이터를 찾을 수 없습니다."));
+                return;
+            }
+
+            QJsonObject firstFeature = features[0].toObject();
+            QJsonObject properties = firstFeature.value("properties").toObject();
+            QString pnu = properties.value("pnu").toString();
+            QString jimok = properties.value("jimok_nm").toString();
+            qCDebug(PlanMasterControllerLog) << "Step 2 Success - PNU:" << pnu << "Land Type:" << jimok;
+
+            QJsonObject geometry = firstFeature.value("geometry").toObject();
+            if (!geometry.contains("type") || !geometry.contains("coordinates")) {
+                qCWarning(PlanMasterControllerLog) << "Invalid geometry in cadastral data";
+                emit errorMessage(tr("잘못된 주소: 유효하지 않은 지적도 데이터입니다."));
+                return;
+            }
+
+            QString geomType = geometry.value("type").toString();
+            QJsonArray coordinates = geometry.value("coordinates").toArray();
+            QList<QGeoCoordinate> polygonPoints;
+            if (geomType == "Polygon") {
+                QJsonArray polygonRing = coordinates[0].toArray();
+                qCDebug(PlanMasterControllerLog) << "Processing Polygon with" << polygonRing.size() << "boundary points";
+                for (const QJsonValue& pointValue : polygonRing) {
+                    QJsonArray point = pointValue.toArray();
+                    if (point.size() >= 2) {
+                        double longitude = point[0].toDouble();
+                        double latitude = point[1].toDouble();
+                        QGeoCoordinate coord(latitude, longitude);
+                        if (coord.isValid()) {
+                            polygonPoints.append(coord);
+                        }
+                    }
+                }
+            } else if (geomType == "MultiPolygon") {
+                QJsonArray firstPolygon = coordinates[0].toArray();
+                QJsonArray polygonRing = firstPolygon[0].toArray();
+                qCDebug(PlanMasterControllerLog) << "Processing MultiPolygon with" << polygonRing.size() << "boundary points";
+                for (const QJsonValue& pointValue : polygonRing) {
+                    QJsonArray point = pointValue.toArray();
+                    if (point.size() >= 2) {
+                        double longitude = point[0].toDouble();
+                        double latitude = point[1].toDouble();
+                        QGeoCoordinate coord(latitude, longitude);
+                        if (coord.isValid()) {
+                            polygonPoints.append(coord);
+                        }
+                    }
+                }
+            } else {
+                qCWarning(PlanMasterControllerLog) << "Unsupported geometry type:" << geomType;
+                emit errorMessage(tr("지원되지 않는 지적도 형상입니다: %1").arg(geomType));
+                return;
+            }
+
+            if (polygonPoints.size() < 3) {
+                qCWarning(PlanMasterControllerLog) << "Insufficient boundary points for survey creation:" << polygonPoints.size();
+                emit errorMessage(tr("Survey 생성에 필요한 경계점이 부족합니다."));
+                return;
+            }
+
+            qCDebug(PlanMasterControllerLog) << "Successfully parsed" << polygonPoints.size() << "valid boundary points";
+
+            // Survey 미션 생성
+            int nextIndex = _missionController.currentPlanViewVIIndex() + 1;
+            _missionController.insertComplexMissionItem("Survey", polygonPoints.first(), nextIndex, true);
+
+            VisualMissionItem* newSurveyItem = qobject_cast<VisualMissionItem*>(_missionController.visualItems()->get(nextIndex));
+            if (newSurveyItem) {
+                SurveyComplexItem* surveyItem = qobject_cast<SurveyComplexItem*>(newSurveyItem);
+                if (surveyItem) {
+                    QGCMapPolygon* polygon = surveyItem->surveyAreaPolygon();
+                    if (polygon) {
+                        polygon->setPath(polygonPoints);
+                        qCDebug(PlanMasterControllerLog) << "Successfully set survey area polygon with" << polygonPoints.size() << "points";
+                    } else {
+                        qCWarning(PlanMasterControllerLog) << "Failed to get surveyAreaPolygon from SurveyComplexItem";
+                        emit errorMessage(tr("Survey 영역 폴리곤을 설정하지 못했습니다."));
+                    }
+                } else {
+                    qCWarning(PlanMasterControllerLog) << "Failed to cast VisualMissionItem to SurveyComplexItem";
+                    emit errorMessage(tr("Survey 미션 아이템으로 변환하지 못했습니다."));
+                }
+
+                qCDebug(PlanMasterControllerLog) << "Successfully created Survey mission with" << polygonPoints.size() << "boundary points";
+                emit errorMessage(tr("Survey 미션이 생성되었습니다: %1 (PNU: %2)").arg(jibunText, pnu));
+
+                // 폴리곤 중심으로 지도 이동
+                QGeoCoordinate center = calculatePolygonCenter(polygonPoints);
+                if (center.isValid()) {
+                    double maxDistance = 0.0;
+                    for (int i = 0; i < polygonPoints.size(); ++i) {
+                        for (int j = i + 1; j < polygonPoints.size(); ++j) {
+                            double distance = polygonPoints[i].distanceTo(polygonPoints[j]);
+                            maxDistance = qMax(maxDistance, distance);
+                        }
+                    }
+                    int zoomLevel = maxDistance > 1000 ? 13 : maxDistance > 500 ? 14 : 15;
+                    qCDebug(PlanMasterControllerLog) << "Emitting panAndZoomMap signal to QML with lat:" << center.latitude() << "lon:" << center.longitude() << "zoom:" << zoomLevel;
+                    emit panAndZoomMap(center.latitude(), center.longitude(), zoomLevel);
+                } else {
+                    qCWarning(PlanMasterControllerLog) << "Invalid polygon center for address:" << jibunText;
+                    emit errorMessage(tr("폴리곤 중심을 계산할 수 없습니다."));
+                }
+                emit planReadyForViewing();
+            } else {
+                qCWarning(PlanMasterControllerLog) << "Failed to create Survey mission item";
+                emit errorMessage(tr("Survey 미션 생성에 실패했습니다."));
+            }
+        });
+    });
 }
 
-void PlanMasterController::loadStreetPolygon(const QString& featureId)
-{
-   
+void PlanMasterController::loadStreetPolygon(const QString& featureId) {
+    if (featureId.trimmed().isEmpty()) {
+        qCWarning(PlanMasterControllerLog) << "Invalid featureId input: Empty";
+        emit errorMessage(tr("잘못된 주소: 유효한 지적도 ID를 입력하세요."));
+        return;
+    }
+
+    QByteArray apiKey = qgetenv("v_world_key");
+    if (apiKey.isEmpty()) {
+        qCWarning(PlanMasterControllerLog) << "v_world_key is not set";
+        emit errorMessage(tr("V-World API 키가 설정되지 않았습니다."));
+        return;
+    }
+
+    qCDebug(PlanMasterControllerLog) << "Loading polygon for featureId (PNU):" << featureId;
+
+    // V-World 지적도 API 호출 (LP_PA_CBND_BUBUN)
+    QString cadastralUrl = QString("https://api.vworld.kr/req/data?service=data&version=2.0&request=GetFeature&format=json&size=10&page=1&geometry=true&attribute=true&crs=EPSG:4326&data=LP_PA_CBND_BUBUN&key=%1&domain=&attributeFilter=pnu=%2")
+                               .arg(QString(apiKey))
+                               .arg(QUrl::toPercentEncoding(featureId));
+    qCDebug(PlanMasterControllerLog) << "Cadastral URL for LP_PA_CBND_BUBUN:" << cadastralUrl;
+
+    QNetworkAccessManager* cadastralManager = new QNetworkAccessManager(this);
+    connect(cadastralManager, &QNetworkAccessManager::finished, cadastralManager, &QObject::deleteLater);
+    QNetworkReply* cadastralReply = cadastralManager->get(QNetworkRequest(QUrl(cadastralUrl)));
+    connect(cadastralReply, &QNetworkReply::finished, this, [this, cadastralReply, featureId]() {
+        cadastralReply->deleteLater();
+
+        if (cadastralReply->error() != QNetworkReply::NoError) {
+            qCWarning(PlanMasterControllerLog) << "Cadastral API error:" << cadastralReply->errorString();
+            emit errorMessage(tr("지적도 데이터를 가져오지 못했습니다: %1").arg(cadastralReply->errorString()));
+            return;
+        }
+
+        QByteArray cadastralResponseData = cadastralReply->readAll();
+        qCDebug(PlanMasterControllerLog) << "Cadastral API response:" << QString(cadastralResponseData);
+
+        QJsonDocument cadastralDoc = QJsonDocument::fromJson(cadastralResponseData);
+        if (cadastralDoc.isNull() || !cadastralDoc.isObject()) {
+            qCWarning(PlanMasterControllerLog) << "Invalid JSON response from cadastral API";
+            emit errorMessage(tr("지적도 API 응답을 파싱할 수 없습니다."));
+            return;
+        }
+
+        QJsonObject cadastralResponse = cadastralDoc.object().value("response").toObject();
+        if (cadastralResponse.value("status").toString() != "OK") {
+            qCWarning(PlanMasterControllerLog) << "Cadastral API status not OK:" << cadastralResponse.value("status").toString();
+            emit errorMessage(tr("지적도 데이터를 찾을 수 없습니다."));
+            return;
+        }
+
+        QJsonArray features = cadastralResponse.value("result").toObject().value("featureCollection").toObject().value("features").toArray();
+        if (features.isEmpty()) {
+            qCWarning(PlanMasterControllerLog) << "No features found in cadastral data for featureId:" << featureId;
+            emit errorMessage(tr("지정된 지번에서 지적도 데이터를 찾을 수 없습니다."));
+            return;
+        }
+
+        QJsonObject firstFeature = features[0].toObject();
+        QJsonObject properties = firstFeature.value("properties").toObject();
+        QString pnu = properties.value("pnu").toString();
+        QString jimok = properties.value("jimok_nm").toString();
+        qCDebug(PlanMasterControllerLog) << "Cadastral data - PNU:" << pnu << "Land Type:" << jimok;
+
+        QJsonObject geometry = firstFeature.value("geometry").toObject();
+        if (!geometry.contains("type") || !geometry.contains("coordinates")) {
+            qCWarning(PlanMasterControllerLog) << "Invalid geometry in cadastral data";
+            emit errorMessage(tr("유효하지 않은 지적도 데이터입니다."));
+            return;
+        }
+
+        QString geomType = geometry.value("type").toString();
+        QJsonArray coordinates = geometry.value("coordinates").toArray();
+        QList<QGeoCoordinate> polygonPoints;
+        if (geomType == "Polygon") {
+            QJsonArray polygonRing = coordinates[0].toArray();
+            qCDebug(PlanMasterControllerLog) << "Processing Polygon with" << polygonRing.size() << "boundary points";
+            for (const QJsonValue& pointValue : polygonRing) {
+                QJsonArray point = pointValue.toArray();
+                if (point.size() >= 2) {
+                    double longitude = point[0].toDouble();
+                    double latitude = point[1].toDouble();
+                    QGeoCoordinate coord(latitude, longitude);
+                    if (coord.isValid()) {
+                        polygonPoints.append(coord);
+                    }
+                }
+            }
+        } else if (geomType == "MultiPolygon") {
+            QJsonArray firstPolygon = coordinates[0].toArray();
+            QJsonArray polygonRing = firstPolygon[0].toArray();
+            qCDebug(PlanMasterControllerLog) << "Processing MultiPolygon with" << polygonRing.size() << "boundary points";
+            for (const QJsonValue& pointValue : polygonRing) {
+                QJsonArray point = pointValue.toArray();
+                if (point.size() >= 2) {
+                    double longitude = point[0].toDouble();
+                    double latitude = point[1].toDouble();
+                    QGeoCoordinate coord(latitude, longitude);
+                    if (coord.isValid()) {
+                        polygonPoints.append(coord);
+                    }
+                }
+            }
+        } else {
+            qCWarning(PlanMasterControllerLog) << "Unsupported geometry type:" << geomType;
+            emit errorMessage(tr("지원되지 않는 지적도 형상입니다: %1").arg(geomType));
+            return;
+        }
+
+        if (polygonPoints.size() < 3) {
+            qCWarning(PlanMasterControllerLog) << "Insufficient boundary points for survey creation:" << polygonPoints.size();
+            emit errorMessage(tr("Survey 생성에 필요한 경계점이 부족합니다."));
+            return;
+        }
+
+        qCDebug(PlanMasterControllerLog) << "Successfully parsed" << polygonPoints.size() << "valid boundary points";
+
+        // Survey 미션 생성
+        int nextIndex = _missionController.currentPlanViewVIIndex() + 1;
+        _missionController.insertComplexMissionItem("Survey", polygonPoints.first(), nextIndex, true);
+
+        VisualMissionItem* newSurveyItem = qobject_cast<VisualMissionItem*>(_missionController.visualItems()->get(nextIndex));
+        if (newSurveyItem) {
+            SurveyComplexItem* surveyItem = qobject_cast<SurveyComplexItem*>(newSurveyItem);
+            if (surveyItem) {
+                QGCMapPolygon* polygon = surveyItem->surveyAreaPolygon();
+                if (polygon) {
+                    polygon->setPath(polygonPoints);
+                    qCDebug(PlanMasterControllerLog) << "Successfully set survey area polygon with" << polygonPoints.size() << "points";
+                } else {
+                    qCWarning(PlanMasterControllerLog) << "Failed to get surveyAreaPolygon from SurveyComplexItem";
+                    emit errorMessage(tr("Survey 영역 폴리곤을 설정하지 못했습니다."));
+                }
+            } else {
+                qCWarning(PlanMasterControllerLog) << "Failed to cast VisualMissionItem to SurveyComplexItem";
+                emit errorMessage(tr("Survey 미션 아이템으로 변환하지 못했습니다."));
+            }
+
+            qCDebug(PlanMasterControllerLog) << "Successfully created Survey mission with" << polygonPoints.size() << "boundary points";
+            emit errorMessage(tr("Survey 미션이 생성되었습니다: PNU %1").arg(pnu));
+
+            // 폴리곤 중심으로 지도 이동
+            QGeoCoordinate center = calculatePolygonCenter(polygonPoints);
+            if (center.isValid()) {
+                double maxDistance = 0.0;
+                for (int i = 0; i < polygonPoints.size(); ++i) {
+                    for (int j = i + 1; j < polygonPoints.size(); ++j) {
+                        double distance = polygonPoints[i].distanceTo(polygonPoints[j]);
+                        maxDistance = qMax(maxDistance, distance);
+                    }
+                }
+                int zoomLevel = maxDistance > 1000 ? 13 : maxDistance > 500 ? 14 : 15;
+                qCDebug(PlanMasterControllerLog) << "Emitting panAndZoomMap signal to QML with lat:" << center.latitude() << "lon:" << center.longitude() << "zoom:" << zoomLevel;
+                emit panAndZoomMap(center.latitude(), center.longitude(), zoomLevel);
+            } else {
+                qCWarning(PlanMasterControllerLog) << "Invalid polygon center for featureId:" << featureId;
+                emit errorMessage(tr("폴리곤 중심을 계산할 수 없습니다."));
+            }
+            emit planReadyForViewing();
+        } else {
+            qCWarning(PlanMasterControllerLog) << "Failed to create Survey mission item";
+            emit errorMessage(tr("Survey 미션 생성에 실패했습니다."));
+        }
+    });
 }
+
+
+
+
 
