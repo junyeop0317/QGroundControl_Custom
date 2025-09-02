@@ -27,6 +27,8 @@ import QGroundControl.FlightDisplay
 import QGroundControl.UTMSP
 import Qt.labs.folderlistmodel 2.15
 
+import Weather 1.0
+
 
 Item {
     id: _root
@@ -60,6 +62,8 @@ Item {
     property bool   _triggerSubmit
     property bool   _resetRegisterFlightPlan
 
+
+
     readonly property var       _layers:                    [_layerMission, _layerGeoFence, _layerRallyPoints]
     readonly property var       _layersUTMSP:               [_layerMission, _layerRallyPoints, _layerUTMSP] //Adds additional UTMSP layer
 
@@ -68,6 +72,54 @@ Item {
     readonly property int       _layerRallyPoints:          3
     readonly property int       _layerUTMSP:                4 // Additional Tab button when UTMSP is enabled
     readonly property string    _armedVehicleUploadPrompt:  qsTr("Vehicle is currently armed. Do you want to upload the mission to the vehicle?")
+
+    //인스턴스화
+    WeatherManager { id: weatherManager }
+
+    //Takeoff 좌표값 나타내는 함수
+    function getTakeoffCoordinate() {
+            for (var i = 0; i < _missionController.visualItems.count; i++) {
+                var item = _missionController.visualItems.get(i);
+                if (item.isTakeoffItem) {
+                    console.log("TakeOff Coordinate found: latitude =", item.coordinate.latitude, "longitude =", item.coordinate.longitude);
+                    return item.coordinate;
+                }
+            }
+            console.log("No valid TakeOff coordinate found");
+            return QtPositioning.coordinate();
+        }
+
+    //Launch 좌표값 나타내는 함수
+    function getLaunchCoordinate() {
+            var coord = _missionController.plannedHomePosition;
+            if (coord.isValid) {
+                console.log("Launch Coordinate found: latitude =", coord.latitude, "longitude =", coord.longitude);
+                return coord;
+            } else if (_missionController.visualItems.count > 0) {
+                var firstItemCoord = _missionController.visualItems.get(0).coordinate;
+                console.log("Launch Coordinate (first item): latitude =", firstItemCoord.latitude, "longitude =", firstItemCoord.longitude);
+                return firstItemCoord;
+            }
+            console.log("No valid Launch coordinate found");
+            return QtPositioning.coordinate();
+        }
+
+    //좌표 변경 시그널 추가:좌표 변경 시 콘솔 로그를 출력하도록 Connections를 설정.
+    Connections {
+            target: _missionController
+            function onVisualItemsChanged() {
+                var coord = getTakeoffCoordinate();
+                if (coord.isValid) {
+                    console.log("TakeOff Coordinate updated: latitude =", coord.latitude, "longitude =", coord.longitude);
+                }
+            }
+            function onPlannedHomePositionChanged() {
+                var coord = getLaunchCoordinate();
+                if (coord.isValid) {
+                    console.log("Launch Coordinate updated: latitude =", coord.latitude, "longitude =", coord.longitude);
+                }
+            }
+        }
 
 
     function mapCenter() {
@@ -340,6 +392,8 @@ Item {
         anchors.top:    planToolBar.bottom
         anchors.bottom: parent.bottom
 
+
+
         FlightMap {
             id:                         editorMap
             anchors.fill:               parent
@@ -548,6 +602,27 @@ Item {
                     _resetGeofencePolygon = true
                 }
             }
+
+            //마우스 우클릭 시 좌표값 반환
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.RightButton
+                enabled: weatherPopup.weatherMode === "mouse"
+                onClicked: (mouse) => {
+                    if (mouse.button === Qt.RightButton && weatherPopup.weatherMode === "mouse") {
+                        var geo = editorMap.toCoordinate(Qt.point(mouse.x, mouse.y))
+                        console.log("Right-click detected, fetching weather for coordinates:", geo.latitude, geo.longitude)
+                        if (weatherManager) {
+                            weatherManager.fetchWeatherData(geo.latitude, geo.longitude)
+                        } else {
+                            console.log("weatherManager is not defined")
+                        }
+                    }
+                }
+            }
+
+
+
         }
 
         //-----------------------------------------------------------
@@ -670,7 +745,6 @@ Item {
                             cadastralSearchPanel.visible = !cadastralSearchPanel.visible
                         }
                     }
-
                 ]
             }
 
@@ -744,6 +818,13 @@ Item {
                 }
             }
         }
+
+
+
+
+
+
+
 
 
         //-----------------------------------------------------------
@@ -920,38 +1001,97 @@ Item {
             text:                       qsTr("Powered by %1").arg(_licenseString)
         }
 
+        // 미션 상태 표시 영역
+        // TerrainStatus 컴포넌트는 현재 미션 상태(Sequence Number, 진행 상태 등)를 화면 하단에 표시
         TerrainStatus {
-            id:                 terrainStatus
-            anchors.margins:    _toolsMargin
-            anchors.leftMargin: 0
-            anchors.left:       mapScale.left
-            anchors.right:      rightPanel.left
-            anchors.bottom:     parent.bottom
-            height:             ScreenTools.defaultFontPixelHeight * 7
-            missionController:  _missionController
-            visible:            _internalVisible && _editingLayer === _layerMission && QGroundControl.corePlugin.options.showMissionStatus
-
-            onSetCurrentSeqNum: _missionController.setCurrentPlanViewSeqNum(seqNum, true)
-
-            property bool _internalVisible: _planViewSettings.showMissionItemStatus.rawValue
-
-            function toggleVisible() {
-                _internalVisible = !_internalVisible
-                _planViewSettings.showMissionItemStatus.rawValue = _internalVisible
+                id: terrainStatus
+                anchors.margins: _toolsMargin
+                anchors.leftMargin: 0
+                anchors.left: mapScale.left
+                anchors.right: rightPanel.left
+                anchors.bottom: parent.bottom
+                height: ScreenTools.defaultFontPixelHeight * 7
+                missionController: _missionController
+                visible: _internalVisible && _editingLayer === _layerMission && QGroundControl.corePlugin.options.showMissionStatus
+                onSetCurrentSeqNum: _missionController.setCurrentPlanViewSeqNum(seqNum, true)
+                property bool _internalVisible: _planViewSettings.showMissionItemStatus.rawValue
+                function toggleVisible() {
+                    _internalVisible = !_internalVisible
+                    _planViewSettings.showMissionItemStatus.rawValue = _internalVisible
+                }
             }
-        }
 
-        MapScale {
-            id:                     mapScale
-            anchors.margins:        _toolsMargin
-            anchors.bottom:         terrainStatus.visible ? terrainStatus.top : parent.bottom
-            anchors.left:           toolStrip.y + toolStrip.height + _toolsMargin > mapScale.y ? toolStrip.right: parent.left
-            mapControl:             editorMap
-            buttonsOnLeft:          true
-            terrainButtonVisible:   _editingLayer === _layerMission
-            terrainButtonChecked:   terrainStatus.visible
-            onTerrainButtonClicked: terrainStatus.toggleVisible()
-        }
+             // 지도 축척 표시 및 버튼 영역
+            // MapScale 컴포넌트는 지도 확대/축소, Terrain 버튼, Weather 버튼 등 지도 관련 도구 제공
+            MapScale {
+                id: mapScale
+                anchors.margins: _toolsMargin
+                anchors.bottom: terrainStatus.visible ? terrainStatus.top : parent.bottom
+                anchors.left: toolStrip.y + toolStrip.height + _toolsMargin > mapScale.y ? toolStrip.right : parent.left
+                mapControl: editorMap
+                buttonsOnLeft: true
+                terrainButtonVisible: _editingLayer === _layerMission
+                terrainButtonChecked: terrainStatus.visible
+                onTerrainButtonClicked: terrainStatus.toggleVisible()
+                onShowWeatherPopup: {
+                    console.log("Received showWeatherPopup signal");
+                    weatherPopup.x = mapScale.weatherButtonX + mapScale.x;
+                    weatherPopup.y = mapScale.weatherButtonY + mapScale.y - weatherPopup.height;
+                    weatherPopup.visible = !weatherPopup.visible;
+                    weatherPopup.mouseEnabled = false; // TakeOff/Launch 버튼 사용을 위해 초기화
+                    console.log("WeatherPopup toggled, visible =", weatherPopup.visible, "mouseEnabled =", weatherPopup.mouseEnabled);
+                }
+            }
+
+            // 날씨 정보 팝업
+            // WeatherPopup 컴포넌트는 날씨 정보를 화면에 표시하고, 다양한 좌표(Launch, TakeOff, Drone, Map Center, Mouse 클릭)를 지원
+            WeatherPopup {
+                id: weatherPopup
+                editorMap: editorMap
+                weatherManager: weatherManager
+                planView: _root
+                anchors.bottom: missionItemEditor.top
+                anchors.horizontalCenter: missionItemEditor.horizontalCenter
+                anchors.bottomMargin: 10
+                z: 5000
+                visible: false
+                property bool mouseEnabled: false
+
+                onVisibleChanged: {
+                    console.log("WeatherPopup visibility changed, visible:", visible, "mouseEnabled:", mouseEnabled);
+                }
+
+                Component.onCompleted: {
+                    console.log("PlanView: WeatherPopup initialized, weatherManager:", weatherManager ? "Valid" : "Null", "planView:", planView ? "Valid" : "Null");
+                }
+            }
+
+            // 미션 컨트롤러와 연결
+            // Connections는 signal을 받아서 WeatherPopup과 상호작용
+            Connections {
+                target: _missionController
+                function onCurrentPlanElementChanged() {
+                    console.log("Current plan element changed");
+                    if (weatherPopup.mouseEnabled) {
+                        var currentItem = _missionController.currentPlanElement;
+                        if (currentItem && currentItem.coordinate && currentItem.coordinate.isValid) {
+                            var coord = currentItem.coordinate;
+                            console.log("Fetching weather for coordinates: latitude =", coord.latitude, "longitude =", coord.longitude);
+                            if (weatherManager) {
+                                weatherManager.fetchWeatherData(coord.latitude, coord.longitude);
+                            } else {
+                                console.log("weatherManager is not defined");
+                            }
+                        } else {
+                            console.log("Weather fetch skipped: No valid coordinate");
+                        }
+                    } else {
+                        console.log("Weather fetch skipped: mouseEnabled is false");
+                    }
+                }
+            }
+
+
     }
 
     function showLoadFromFileOverwritePrompt(title) {
@@ -1202,7 +1342,7 @@ Item {
                         SectionHeader {
                             id: missionFilesSection
                             Layout.fillWidth: true
-                            text: qsTr("Mission Files")
+                            text: qsTr("Favorite Mission")
                             checked: true
                         }
 

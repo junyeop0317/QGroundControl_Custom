@@ -47,6 +47,7 @@
 #include "VehicleComponent.h"
 #include "VideoManager.h"
 #include "QmlControls/VWorldSearch.h"
+#include "QmlControls/WeatherManager.h"
 
 
 #ifndef QGC_NO_SERIAL_LINK
@@ -97,7 +98,7 @@ QGCApplication::QGCApplication(int &argc, char *argv[], bool unitTesting, bool s
 #ifdef QGC_DAILY_BUILD
         // This gives daily builds their own separate settings space. Allowing you to use daily and stable builds
         // side by side without daily screwing up your stable settings.
-        applicationName = QStringLiteral("%1 awesome-tech").arg(QGC_APP_NAME);
+        applicationName = QStringLiteral("%1 Hancom Awesome Tech Inc.").arg(QGC_APP_NAME);
 #else
         applicationName = QGC_APP_NAME;
 #endif
@@ -261,6 +262,7 @@ void QGCApplication::_initForNormalAppBoot()
     MultiVehicleManager::instance()->init();
     _qmlAppEngine = QGCCorePlugin::instance()->createQmlApplicationEngine(this);
     qmlRegisterType<VWorldSearch>("QGroundControl.VWorldSearch", 1, 0, "VWorldSearch");
+    qmlRegisterType<WeatherManager>("Weather", 1, 0, "WeatherManager");
     QObject::connect(_qmlAppEngine, &QQmlApplicationEngine::objectCreationFailed, this, QCoreApplication::quit, Qt::QueuedConnection);
     QGCCorePlugin::instance()->createRootWindow(_qmlAppEngine);
     AudioOutput::instance()->init(SettingsManager::instance()->appSettings()->audioMuted());

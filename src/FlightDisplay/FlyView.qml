@@ -39,6 +39,10 @@ Item {
     // Properties of UTM adapter
     property bool utmspSendActTrigger: false
 
+
+    // 드론 좌표를 노출하는 속성 추가
+    property variant droneCoordinate: _activeVehicle ? _activeVehicle.coordinate : QtPositioning.coordinate(0, 0)
+
     PlanMasterController {
         id:                     _planController
         flyView:                true
@@ -176,6 +180,17 @@ Item {
         Viewer3D {
             id: viewer3DWindow
             anchors.fill: parent
+        }
+    }
+
+    //드론 좌표를 Signal을 받아서 WeatherPopup과 상호작용
+    Connections {
+        target: _activeVehicle
+        onCoordinateChanged: {
+            if (_activeVehicle && _activeVehicle.coordinate.isValid) {
+                _root.droneCoordinate = _activeVehicle.coordinate
+                // console.log("Drone coordinate updated:", _root.droneCoordinate)  // <-- 이 부분 주석
+            }
         }
     }
 

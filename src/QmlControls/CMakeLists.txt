@@ -57,6 +57,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         ToolStripActionList.h
         VWorldSearch.cpp
         VWorldSearch.h
+        WeatherManager.cpp
+        WeatherManager.h
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -169,6 +171,7 @@ qt_add_qml_module(QGroundControlControlsModule
         ValueSlider.qml
         VehicleRotationCal.qml
         VehicleSummaryRow.qml
+        WeatherPopup.qml
 
 # Due to the fact t hatset_source_files_properties with QT_RESOURCE_ALIAS doesn't work in cmombination with qt_qdd_add_qml_module on Windows.
 # We had to move various qml files to this directory to get things to work. We will revisit this in the 5.1 release.
