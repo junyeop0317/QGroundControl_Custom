@@ -14,20 +14,17 @@ import QtLocation
 import QtPositioning
 import QtQuick.Layouts
 import QtQuick.Window
-import QtCore //FileID를 위해 추가
 import QGroundControl
 import QGroundControl.FlightMap
-
 import QGroundControl.Controls
-
 import QGroundControl.FactControls
-
 
 import QGroundControl.FlightDisplay
 import QGroundControl.UTMSP
 import Qt.labs.folderlistmodel 2.15
 
-import Weather 1.0
+import QtCore //FileID를 위해 추가
+import Weather 1.0 //WeatherManager
 
 
 Item {
@@ -466,7 +463,7 @@ Item {
             }
 
 
-            // PlanMasterController 신호 처리
+            // PlanMasterController 신호 처리 (지번 검색 시 시그널 호출)
             Connections {
                 target: planMasterController
                 onPanAndZoomMap: (latitude, longitude, zoomLevel) => {
@@ -1417,19 +1414,19 @@ Item {
                             onClicked: {
                                 var filePath = folderModel.folder.toString().replace("file://", "") + "/" + fileName
 
-                                // 1️⃣ 파일 로드
+                                // 1. 파일 로드
                                 _planMasterController.loadFromFile(filePath)
 
-                                // 2️⃣ 미션 첫 항목 선택
+                                // 2. 미션 첫 항목 선택
                                 _missionController.setCurrentPlanViewSeqNum(0, true)
 
-                                // 3️⃣ Mission 전체 중심으로 화면 이동
+                                // 3. Mission 전체 중심으로 화면 이동
                                 _planMasterController.fitViewportToItems()
 
-                                // 4️⃣ 추가 줌 아웃
+                                // 4. 추가 줌 아웃
                                 editorMap.zoomLevel = editorMap.zoomLevel - 1   // 필요에 따라 조정
 
-                                // 5️⃣ 드롭다운 패널 닫기
+                                // 5. 드롭다운 패널 닫기
                                 dropPanel.hide()
                             }
                         }

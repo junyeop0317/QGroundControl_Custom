@@ -30,7 +30,12 @@ void WeatherManager::fetchWeatherData(double lat, double lon)
 // ------------------- 위도/경도를 기상청 격자 좌표(X,Y)로 변환 -------------------
 void WeatherManager::convertLatLonToGrid(double lat, double lon)
 {
-    QString apiKey = "vRwP2-S3T0acD9vkt99GtA";
+    QString apiKey = QString::fromLocal8Bit(qgetenv("weather_key"));
+    if (apiKey.isEmpty()) {
+        qWarning() << "환경 변수 weather_key가 설정되지 않았습니다!";
+        emit weatherDataReady(QVariantList() << QVariantMap({{"error", "Missing weather API key"}}));
+        return;
+    }
     QString urlStr = QString(
         "https://apihub.kma.go.kr/api/typ01/cgi-bin/url/nph-dfs_xy_lonlat?"
         "lon=%1&lat=%2&help=0&authKey=%3")
@@ -80,7 +85,12 @@ void WeatherManager::convertLatLonToGrid(double lat, double lon)
 // ------------------- 격자 좌표를 이용해 실제 날씨 API 요청 및 XML 파싱 -------------------
 void WeatherManager::requestWeatherData(int gridX, int gridY)
 {
-    QString apiKey = "vRwP2-S3T0acD9vkt99GtA";
+    QString apiKey = QString::fromLocal8Bit(qgetenv("weather_key"));
+    if (apiKey.isEmpty()) {
+        qWarning() << "환경 변수 weather_key가 설정되지 않았습니다!";
+        emit weatherDataReady(QVariantList() << QVariantMap({{"error", "Missing weather API key"}}));
+        return;
+    }
     QDateTime current = QDateTime::currentDateTime();
 
     int hour = current.time().hour();

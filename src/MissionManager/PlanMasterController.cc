@@ -691,7 +691,7 @@ QGeoCoordinate PlanMasterController::calculatePolygonCenter(const QList<QGeoCoor
 
 
 
-
+// 주소 검색 및 지도 이동
 void PlanMasterController::searchAndGo(const QString& address, bool panAfterSearch) {
     // 주소 입력 검증
     if (address.trimmed().isEmpty() || address.length() < 2) {
@@ -800,6 +800,7 @@ void PlanMasterController::searchAndGo(const QString& address, bool panAfterSear
     });
 }
 
+// 좌표 검증
 void PlanMasterController::addWaypointAndZoom(double latitude, double longitude) {
     if (qIsNaN(latitude) || qIsNaN(longitude)) {
         qCWarning(PlanMasterControllerLog) << "Invalid coordinates for waypoint: lat=" << latitude << "lon=" << longitude;
@@ -821,6 +822,7 @@ void PlanMasterController::addWaypointAndZoom(double latitude, double longitude)
     emit panAndZoomMap(coordinate.latitude(), coordinate.longitude(), 15);
 }
 
+//도로명 주소 기반 지적도 검색 & Survey 생성
 void PlanMasterController::findCadastralAndCreateSurvey(const QString& address) {
     // 주소 입력 검증
     if (address.trimmed().isEmpty()) {
@@ -1052,6 +1054,8 @@ QVariantList PlanMasterController::streetResults() const {
     return _streetResults;
 }
 
+
+//지번(토지) 주소 검색
 void PlanMasterController::searchStreet(const QString& jibunText) {
     // 입력 검증
     if (jibunText.trimmed().isEmpty()) {
@@ -1272,6 +1276,8 @@ void PlanMasterController::searchStreet(const QString& jibunText) {
     });
 }
 
+
+// 지번 코드(PNU) 기반 지적도 폴리곤 로딩
 void PlanMasterController::loadStreetPolygon(const QString& featureId) {
     if (featureId.trimmed().isEmpty()) {
         qCWarning(PlanMasterControllerLog) << "Invalid featureId input: Empty";
